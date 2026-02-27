@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Data Dash | USADATA</title>
+  <meta name="description" content="Data Dash - a retro arcade game by USADATA. Collect quality leads, dodge bad data, and learn about data-driven marketing." />
+  <meta property="og:title" content="Data Dash | USADATA" />
+  <meta property="og:description" content="Can you master your data? Play Data Dash and find out." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: #060D18;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Press Start 2P', 'Courier New', monospace;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: manipulation;
+    }
+    #root { width: 100%; max-width: 480px; padding: 8px; }
+    button { touch-action: manipulation; }
+    input { touch-action: auto; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+  <script>
+    const { useState, useEffect, useCallback, useRef, createElement: h } = React;
+
+    // ==========================================
+    // CONSTANTS
+    // ==========================================
+
+    const COLORS = {
+      deepBlue: "#0A1628", brandBlue: "#1B3A5C", accentBlue: "#2E6BA6",
+      teal: "#00B4A0", green: "#3EBD7C", brightGreen: "#50E3A4",
+      white: "#FFFFFF", offWhite: "#E8F0F8", gold: "#FFD700",
+      red: "#FF4444", darkRed: "#CC2222", orange: "#FF8C42",
+      purple: "#8B5CF6", gray: "#6B7B8D", darkGray: "#2A3A4A",
+    };
+
+    const PF = { fontFamily: "'Press Start 2P', 'Courier New', monospace", imageRendering: "pixelated" };
+    const DF = { fontFamily: "'DM Sans', sans-serif" };
+
+    // ==========================================
+    // SOUND ENGINE
+    // ==========================================
+
+    const SFX = {
+      ready: false, muted: false, syn: null, noi: null, bas: null,
+      async init() {
+        if (this.ready) return;
+        try {
+          await Tone.start();
+          this.syn = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0.05, release: 0.1 }, volume: -12 }).toDestination();
+          this.noi = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.005, decay: 0.05, sustain: 0, release: 0.02 }, volume: -20 }).toDestination();
+          this.bas = new Tone.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.15, sustain: 0.02, release: 0.1 }, volume: -10 }).toDestination();
+          this.ready = true;
+        } catch(e) {}
+      },
+      play(s) {
+        if (!this.ready || this.muted) return;
+        try {
+          const t = Tone.now();
+          switch(s) {
+            case "collect": this.syn.triggerAttackRelease("C5","0.06",t); this.syn.triggerAttackRelease("E5","0.06",t+0.06); this.syn.triggerAttackRelease("G5","0.08",t+0.12); break;
+            case "hit": this.bas.triggerAttackRelease("C2","0.15",t); this.noi.triggerAttackRelease("0.08",t+0.02); break;
+            case "powerup": this.syn.triggerAttackRelease("C5","0.05",t); this.syn.triggerAttackRelease("E5","0.05",t+0.05); this.syn.triggerAttackRelease("G5","0.05",t+0.1); this.syn.triggerAttackRelease("C6","0.12",t+0.15); break;
+            case "quizY": this.syn.triggerAttackRelease("E5","0.08",t); this.syn.triggerAttackRelease("G5","0.08",t+0.1); this.syn.triggerAttackRelease("B5","0.12",t+0.2); break;
+            case "quizN": this.bas.triggerAttackRelease("E3","0.12",t); this.bas.triggerAttackRelease("Eb3","0.18",t+0.12); break;
+            case "lvlUp": ["C5","D5","E5","G5","C6"].forEach((n,i)=>this.syn.triggerAttackRelease(n,"0.08",t+i*0.08)); break;
+            case "over": ["G4","E4","C4","G3"].forEach((n,i)=>this.bas.triggerAttackRelease(n,"0.2",t+i*0.2)); break;
+            case "start": ["C4","E4","G4","C5"].forEach((n,i)=>this.syn.triggerAttackRelease(n,"0.06",t+i*0.06)); break;
+            case "move": this.syn.triggerAttackRelease("A4","0.03",t); break;
+            case "combo": this.syn.triggerAttackRelease("A5","0.04",t); this.syn.triggerAttackRelease("C6","0.06",t+0.04); break;
+            case "block": this.syn.triggerAttackRelease("G4","0.04",t); this.noi.triggerAttackRelease("0.03",t); break;
+            case "hiscore": ["C5","E5","G5","C6","E6","G6","C7"].forEach((n,i)=>this.syn.triggerAttackRelease(n,"0.06",t+i*0.07)); break;
+          }
+        } catch(e) {}
+      },
+      toggle() { this.muted = !this.muted; return this.muted; }
+    };
+
+    // ==========================================
+    // LEADERBOARD (localStorage)
+    // ==========================================
+
+    const LB_KEY = "datadash_lb_v1";
+    const LB_MAX = 10;
+    function lbLoad() { try { return JSON.parse(localStorage.getItem(LB_KEY)) || []; } catch { return []; } }
+    function lbSave(entry) {
+      let b = lbLoad();
+      b.push({ name: entry.name||"ANON", score: entry.score, rating: entry.rating, date: new Date().toISOString().split("T")[0] });
+      b.sort((a,c) => c.score - a.score);
+      b = b.slice(0, LB_MAX);
+      try { localStorage.setItem(LB_KEY, JSON.stringify(b)); } catch {}
+      return b;
+    }
+    function lbIsHigh(b, s) { return !b || b.length < LB_MAX || s > b[b.length-1].score; }
+
+    // ==========================================
+    // GAME DATA
+    // ==========================================
+
+    const POWERUPS = {
+      hygiene: { name: "DATA HYGIENE", desc: "NCOA processing removes bad addresses and outdated records", short: "Cleans junk data!" },
+      enhance: { name: "ENHANCEMENT", desc: "Appends demographics, lifestyle, and purchase behavior to your records", short: "Reveals hidden traits!" },
+      hailey: { name: "HAILEY AI", desc: "AI-powered audience builder finds high-intent prospects fast", short: "AI targets top leads!" },
+      predict: { name: "PREDICTIVE MODEL", desc: "Machine learning forecasts which leads are most likely to convert", short: "Predicts conversions!" },
+    };
+
+    const QUESTIONS = [
+      { q: "You just mailed 10,000 postcards and 2,200 came back undeliverable. Ouch. What should you have done first?", a: ["Crossed your fingers", "Run Data Hygiene", "Printed more"], c: 1, e: "Data Hygiene catches bad addresses before you waste postage. NCOA processing alone can save thousands." },
+      { q: "Your HVAC company has a customer list but you have no idea who has high income or owns their home. How do you find out?", a: ["Ask them nicely", "Data Enhancement", "Check social media"], c: 1, e: "Data Enhancement appends 200+ attributes like income, homeownership, and lifestyle to your existing records." },
+      { q: "It's 4pm on Friday. Your boss needs a targeted mailing list of homeowners in Phoenix by Monday. You...", a: ["Panic", "Use Hailey AI", "Call a meeting"], c: 1, e: "Hailey AI builds highly targeted audiences in minutes. Tell it what you sell, and it picks the right filters." },
+      { q: "You keep mailing the same person at 3 different addresses. They're not amused. What fixes this?", a: ["Apologize profusely", "Customer Linkage", "Send a gift basket"], c: 1, e: "Customer Linkage unifies duplicate records into a single 360-degree view so nobody gets triple-mailed." },
+      { q: "A casino wants to find people who look like their best high-rollers. What do they need first?", a: ["A lucky guess", "A Portrait Report", "A bigger casino"], c: 1, e: "Portrait Reports analyze your best customers' traits so you can find more people just like them." },
+      { q: "You need to buy a list of 5,000 new movers in Dallas. It's 11pm. Where do you go?", a: ["SL360 (it never sleeps)", "The office (hope someone's there)", "Give up until Monday"], c: 0, e: "SL360 is USADATA's 24/7 self-serve platform. Build lists, order leads, and download data anytime." },
+      { q: "Your dental practice has 8,000 patients but only reaching 30% with campaigns. A model could predict who books. What is it?", a: ["A crystal ball", "A Predictive Model", "A really good guess"], c: 1, e: "Predictive Models use machine learning to score which patients are most likely to convert on your next offer." },
+      { q: "True or false: USADATA's database covers over 260 million U.S. consumers and is updated monthly.", a: ["That can't be real", "True, and it's verified", "Only during a full moon"], c: 1, e: "260M+ consumer records across 190M households, refreshed monthly, CASS certified, and privacy compliant." },
+      { q: "Your insurance agency just merged two offices. Duplicate records everywhere. What's the play?", a: ["Hire 10 interns", "Data Hygiene merge/purge", "Pretend it's fine"], c: 1, e: "Merge/purge processing deduplicates your records, saving money and preventing embarrassing double-contacts." },
+      { q: "You want to target renters aged 25-34 within 5 miles of your new apartment complex. Who makes that easy?", a: ["Your cousin who's good with Excel", "USADATA's audience filters", "Post flyers and hope"], c: 1, e: "USADATA lets you filter by age, housing status, income, geography, and hundreds more attributes in minutes." },
+    ];
+
+    const LEVELS = [
+      { name: "RAW DATA", speed: 10, spawn: 280, power: null, bad: 0.45, desc: "Sort the clean leads from the junk!" },
+      { name: "CLEAN SWEEP", speed: 12, spawn: 240, power: "hygiene", bad: 0.5, desc: "Data Hygiene power-up incoming!" },
+      { name: "DEEP INSIGHT", speed: 14, spawn: 200, power: "enhance", bad: 0.5, desc: "Enhancement reveals hidden data!" },
+      { name: "SMART TARGET", speed: 17, spawn: 170, power: "hailey", bad: 0.5, desc: "Hailey AI finds the best leads!" },
+      { name: "PREDICT & WIN", speed: 20, spawn: 140, power: "predict", bad: 0.45, desc: "Predictive Models light the way!" },
+    ];
+
+    const GW = 400, GH = 400, LANES = [100,200,300], HX = 60, LVL_DUR = 18000;
+
+    // ==========================================
+    // SVG PIXEL COMPONENTS (as functions returning h() calls)
+    // ==========================================
+
+    function Hero({x,y,powered,scale=1}) {
+      const s = 4*scale;
+      const kids = [
+        h("rect",{key:"b1",x:2*s,y:0,width:4*s,height:s,fill:COLORS.teal}),
+        h("rect",{key:"b2",x:s,y:s,width:6*s,height:s,fill:COLORS.teal}),
+        h("rect",{key:"b3",x:s,y:2*s,width:6*s,height:s,fill:powered?COLORS.gold:COLORS.accentBlue}),
+        h("rect",{key:"b4",x:2*s,y:3*s,width:4*s,height:s,fill:powered?COLORS.gold:COLORS.accentBlue}),
+        h("rect",{key:"h1",x:2*s,y:-2*s,width:4*s,height:2*s,fill:COLORS.offWhite}),
+        h("rect",{key:"e1",x:3*s,y:-2*s,width:s,height:s,fill:COLORS.deepBlue}),
+        h("rect",{key:"e2",x:5*s,y:-s,width:s,height:s,fill:COLORS.deepBlue}),
+        h("rect",{key:"l1",x:2*s,y:4*s,width:s,height:2*s,fill:COLORS.brandBlue}),
+        h("rect",{key:"l2",x:5*s,y:4*s,width:s,height:2*s,fill:COLORS.brandBlue}),
+      ];
+      if (powered) {
+        kids.push(h("rect",{key:"g1",x:0,y:-3*s,width:8*s,height:9*s,fill:COLORS.gold,opacity:0.15,rx:s}));
+        kids.push(h("rect",{key:"g2",x:-s,y:-s,width:s,height:s,fill:COLORS.gold,opacity:0.6}));
+        kids.push(h("rect",{key:"g3",x:8*s,y:0,width:s,height:s,fill:COLORS.gold,opacity:0.6}));
+      }
+      return h("g",{transform:`translate(${x},${y})`},kids);
+    }
+
+    function GoodLead({x,y,enhanced}) {
+      const s=3, kids = [
+        h("rect",{key:"bg",x:0,y:0,width:8*s,height:10*s,fill:COLORS.green}),
+        h("rect",{key:"h",x:s,y:s,width:6*s,height:3*s,fill:COLORS.brightGreen}),
+        h("rect",{key:"c1",x:2*s,y:5*s,width:s,height:2*s,fill:COLORS.white}),
+        h("rect",{key:"c2",x:3*s,y:6*s,width:s,height:s,fill:COLORS.white}),
+        h("rect",{key:"c3",x:4*s,y:5*s,width:s,height:s,fill:COLORS.white}),
+        h("rect",{key:"c4",x:5*s,y:4*s,width:s,height:s,fill:COLORS.white}),
+      ];
+      if (enhanced) {
+        kids.push(h("rect",{key:"eb",x:-s,y:-s,width:10*s,height:12*s,fill:"none",stroke:COLORS.gold,strokeWidth:2}));
+        kids.push(h("rect",{key:"es",x:7*s,y:-s,width:3*s,height:3*s,fill:COLORS.gold}));
+      }
+      return h("g",{transform:`translate(${x},${y})`},kids);
+    }
+
+    function BadLead({x,y,type}) {
+      const s=3, col = type==="duplicate"?COLORS.orange:type==="outdated"?COLORS.gray:COLORS.red;
+      return h("g",{transform:`translate(${x},${y})`},[
+        h("rect",{key:"bg",x:0,y:0,width:8*s,height:10*s,fill:col}),
+        h("rect",{key:"h",x:s,y:s,width:6*s,height:3*s,fill:COLORS.darkGray,opacity:0.4}),
+        h("rect",{key:"x1",x:2*s,y:5*s,width:s,height:s,fill:COLORS.white}),
+        h("rect",{key:"x2",x:5*s,y:5*s,width:s,height:s,fill:COLORS.white}),
+        h("rect",{key:"x3",x:3*s,y:6*s,width:2*s,height:s,fill:COLORS.white}),
+        h("rect",{key:"x4",x:2*s,y:7*s,width:s,height:s,fill:COLORS.white}),
+        h("rect",{key:"x5",x:5*s,y:7*s,width:s,height:s,fill:COLORS.white}),
+      ]);
+    }
+
+    function PowerUp({x,y,type}) {
+      const s=3, cols={hygiene:COLORS.teal,enhance:COLORS.purple,hailey:COLORS.gold,predict:COLORS.brightGreen};
+      const f = cols[type]||COLORS.teal;
+      return h("g",{transform:`translate(${x},${y})`},[
+        h("rect",{key:"d1",x:3*s,y:0,width:2*s,height:s,fill:f}),
+        h("rect",{key:"d2",x:2*s,y:s,width:4*s,height:s,fill:f}),
+        h("rect",{key:"d3",x:s,y:2*s,width:6*s,height:s,fill:f}),
+        h("rect",{key:"d4",x:0,y:3*s,width:8*s,height:2*s,fill:f}),
+        h("rect",{key:"d5",x:s,y:5*s,width:6*s,height:s,fill:f}),
+        h("rect",{key:"d6",x:2*s,y:6*s,width:4*s,height:s,fill:f}),
+        h("rect",{key:"d7",x:3*s,y:7*s,width:2*s,height:s,fill:f}),
+        h("rect",{key:"sh",x:3*s,y:2*s,width:s,height:s,fill:COLORS.white,opacity:0.5}),
+      ]);
+    }
+
+    function Trophy({size=16,color=COLORS.gold}) {
+      return h("svg",{width:size,height:size,viewBox:"0 0 16 16",style:{display:"inline-block",verticalAlign:"middle"}},[
+        h("rect",{key:"t1",x:4,y:0,width:8,height:2,fill:color}),
+        h("rect",{key:"t2",x:2,y:2,width:12,height:2,fill:color}),
+        h("rect",{key:"t3",x:0,y:2,width:3,height:6,fill:color}),
+        h("rect",{key:"t4",x:13,y:2,width:3,height:6,fill:color}),
+        h("rect",{key:"t5",x:3,y:4,width:10,height:4,fill:color}),
+        h("rect",{key:"t6",x:4,y:8,width:8,height:2,fill:color}),
+        h("rect",{key:"t7",x:6,y:10,width:4,height:2,fill:color}),
+        h("rect",{key:"t8",x:4,y:12,width:8,height:2,fill:color}),
+      ]);
+    }
+
+    // ==========================================
+    // MAIN GAME
+    // ==========================================
+
+    function DataDash() {
+      const [scr, setScr] = useState("title");
+      const [score, setScore] = useState(0);
+      const [lives, setLives] = useState(3);
+      const [lvl, setLvl] = useState(0);
+      const [ents, setEnts] = useState([]);
+      const [lane, setLane] = useState(1);
+      const [aPow, setAPow] = useState(null);
+      const [pTmr, setPTmr] = useState(0);
+      const [cmb, setCmb] = useState(0);
+      const [mxCmb, setMxCmb] = useState(0);
+      const [good, setGood] = useState(0);
+      const [badD, setBadD] = useState(0);
+      const [badC, setBadC] = useState(0);
+      const [qSc, setQSc] = useState(0);
+      const [qTot, setQTot] = useState(0);
+      const [curQ, setCurQ] = useState(null);
+      const [qAns, setQAns] = useState(null);
+      const [pwTip, setPwTip] = useState(null);
+      const [gTime, setGTime] = useState(0);
+      const [flash, setFlash] = useState(null);
+      const [shake, setShake] = useState(false);
+      const [usedQ, setUsedQ] = useState([]);
+      const [form, setForm] = useState({name:"",email:"",company:""});
+      const [sent, setSent] = useState(false);
+      const [parts, setParts] = useState([]);
+      const [scrX, setScrX] = useState(0);
+      const [muted, setMuted] = useState(false);
+      const [aRdy, setARdy] = useState(false);
+      const [lb, setLb] = useState([]);
+      const [showLb, setShowLb] = useState(false);
+      const [newHi, setNewHi] = useState(false);
+      const [lbNm, setLbNm] = useState("");
+      const [lbDone, setLbDone] = useState(false);
+
+      const anim = useRef(null);
+      const lSpn = useRef(0);
+      const lTm = useRef(0);
+      const eId = useRef(0);
+
+      useEffect(() => { setLb(lbLoad()); }, []);
+
+      const initA = async () => { if(!aRdy){ await SFX.init(); setARdy(true); } };
+      const togM = () => { setMuted(SFX.toggle()); };
+
+      // Game loop
+      const loop = useCallback((ts) => {
+        if(!lTm.current) lTm.current = ts;
+        const dt = ts - lTm.current;
+        lTm.current = ts;
+        if(scr !== "game") return;
+
+        setGTime(t => {
+          const nt = t + dt;
+          if(nt >= LVL_DUR){ SFX.play("lvlUp"); setScr("quiz"); pickQ(); return 0; }
+          return nt;
+        });
+
+        setScrX(x => x + LEVELS[lvl].speed * 0.5);
+
+        lSpn.current += dt;
+        const L = LEVELS[lvl];
+        if(lSpn.current >= L.spawn) {
+          lSpn.current = 0;
+          const ln = Math.floor(Math.random()*3);
+          const isG = Math.random() > L.bad;
+          const isP = L.power && Math.random() < 0.15;
+          if(isP) {
+            setEnts(e => [...e, {id:eId.current++,type:"powerup",pt:L.power,x:GW+30,y:LANES[ln],lane:ln,w:24,h:24}]);
+          } else {
+            const bt = ["bad_address","duplicate","outdated"];
+            setEnts(e => [...e, {id:eId.current++,type:isG?"good":"bad",bt:isG?null:bt[Math.floor(Math.random()*3)],x:GW+30,y:LANES[ln],lane:ln,w:24,h:30,enh:aPow==="enhance"&&isG}]);
+          }
+        }
+
+        setEnts(e => e.map(i => ({...i, x:i.x - L.speed})).filter(i => i.x > -40));
+
+        if(aPow) { setPTmr(t => { if(t<=0){setAPow(null);return 0;} return t-dt; }); }
+
+        // Collisions
+        setEnts(elist => {
+          const rem = [];
+          let sa=0, ll=0, ng=0, nb=0;
+          const np = [];
+          for(const e of elist) {
+            const hx = e.x < HX+28 && e.x+e.w > HX;
+            const hy = e.lane === lane;
+            if(hx && hy) {
+              if(e.type==="good") {
+                sa += aPow==="predict"?30:aPow==="hailey"?25:15;
+                ng++;
+                setCmb(c => { const nc=c+1; setMxCmb(m=>Math.max(m,nc)); if(nc>1&&nc%5===0)SFX.play("combo"); return nc; });
+                SFX.play("collect");
+                setFlash(COLORS.green); setTimeout(()=>setFlash(null),100);
+                for(let i=0;i<4;i++) np.push({id:Date.now()+i,x:e.x,y:e.y,dx:(Math.random()-0.5)*4,dy:(Math.random()-0.5)*4,col:COLORS.green,life:500});
+              } else if(e.type==="bad") {
+                if(aPow==="hygiene") {
+                  sa+=5; setBadD(d=>d+1); SFX.play("block"); setFlash(COLORS.teal); setTimeout(()=>setFlash(null),100);
+                } else {
+                  ll++; nb++; setCmb(0); SFX.play("hit"); setShake(true); setFlash(COLORS.red);
+                  setTimeout(()=>{setShake(false);setFlash(null);},200);
+                  for(let i=0;i<3;i++) np.push({id:Date.now()+i+100,x:e.x,y:e.y,dx:(Math.random()-0.5)*3,dy:(Math.random()-0.5)*3,col:COLORS.red,life:400});
+                }
+              } else if(e.type==="powerup") {
+                setAPow(e.pt); setPTmr(5000); setPwTip(e.pt); setTimeout(()=>setPwTip(null),2500);
+                SFX.play("powerup"); setFlash(COLORS.gold); setTimeout(()=>setFlash(null),150);
+                for(let i=0;i<6;i++) np.push({id:Date.now()+i+200,x:e.x,y:e.y,dx:(Math.random()-0.5)*5,dy:(Math.random()-0.5)*5,col:COLORS.gold,life:600});
+              }
+            } else {
+              if(e.type==="bad"&&e.x<HX-10) setBadD(d=>d+1);
+              else rem.push(e);
+            }
+          }
+          if(sa>0)setScore(s=>s+sa);
+          if(ng>0)setGood(g=>g+ng);
+          if(nb>0)setBadC(b=>b+nb);
+          if(ll>0) setLives(l=>{const nl=l-ll;if(nl<=0){SFX.play("over");setScr("results");return 0;}return nl;});
+          if(np.length>0) setParts(p=>[...p,...np]);
+          return rem;
+        });
+
+        setParts(p => p.map(i=>({...i,x:i.x+i.dx,y:i.y+i.dy,life:i.life-dt})).filter(i=>i.life>0));
+        anim.current = requestAnimationFrame(loop);
+      }, [scr, lvl, lane, aPow]);
+
+      useEffect(() => {
+        if(scr==="game"){ lTm.current=0; anim.current=requestAnimationFrame(loop); }
+        return () => { if(anim.current) cancelAnimationFrame(anim.current); };
+      }, [scr, loop]);
+
+      useEffect(() => {
+        if(scr==="results"){ const b=lbLoad(); setLb(b); setNewHi(lbIsHigh(b,score)); }
+      }, [scr, score]);
+
+      // Input
+      useEffect(() => {
+        const fn = e => {
+          if(scr!=="game") return;
+          if(e.key==="ArrowUp"||e.key==="w"){ setLane(l=>Math.max(0,l-1)); SFX.play("move"); }
+          else if(e.key==="ArrowDown"||e.key==="s"){ setLane(l=>Math.min(2,l+1)); SFX.play("move"); }
+        };
+        window.addEventListener("keydown",fn);
+        return ()=>window.removeEventListener("keydown",fn);
+      }, [scr]);
+
+      const tRef = useRef(null);
+      const onTS = e => { tRef.current = e.touches[0].clientY; };
+      const onTE = e => {
+        if(!tRef.current) return;
+        const d = e.changedTouches[0].clientY - tRef.current;
+        if(Math.abs(d)>20){ if(d<0)setLane(l=>Math.max(0,l-1)); else setLane(l=>Math.min(2,l+1)); SFX.play("move"); }
+        tRef.current=null;
+      };
+      const tapLane = i => { if(scr==="game"){setLane(i);SFX.play("move");} };
+
+      // Quiz
+      const pickQ = () => {
+        const av = QUESTIONS.filter((_,i)=>!usedQ.includes(i));
+        const pool = av.length>0?av:QUESTIONS;
+        const idx = Math.floor(Math.random()*pool.length);
+        const ri = QUESTIONS.indexOf(pool[idx]);
+        setCurQ(pool[idx]); setUsedQ(u=>[...u,ri]); setQAns(null);
+      };
+      const ansQ = i => {
+        setQAns(i); setQTot(t=>t+1);
+        if(i===curQ.c){ setQSc(s=>s+1); setScore(s=>s+50); SFX.play("quizY"); }
+        else SFX.play("quizN");
+      };
+      const nextQ = () => {
+        if(lvl>=LEVELS.length-1){ SFX.play("over"); setScr("results"); }
+        else { setLvl(l=>l+1); setEnts([]); setAPow(null); setScr("levelIntro"); }
+      };
+
+      // Start
+      const startGame = async () => {
+        await initA(); SFX.play("start");
+        setScore(0);setLives(3);setLvl(0);setEnts([]);setLane(1);setAPow(null);setPTmr(0);setCmb(0);setMxCmb(0);
+        setGood(0);setBadD(0);setBadC(0);setQSc(0);setQTot(0);setUsedQ([]);setGTime(0);setParts([]);setScrX(0);
+        setNewHi(false);setLbDone(false);setLbNm("");
+        lSpn.current=0;eId.current=0;
+        setScr("levelIntro");
+      };
+      const startLvl = () => { setEnts([]);setGTime(0);lSpn.current=0;SFX.play("start");setScr("game"); };
+      const saveLb = () => {
+        if(!lbNm.trim()) return;
+        const diq = getIQ();
+        const b = lbSave({name:lbNm.trim().toUpperCase(),score,rating:diq.rating});
+        setLb(b); setLbDone(true); SFX.play("hiscore");
+      };
+
+      const getIQ = () => {
+        const p = Math.min(score/2000,1);
+        if(p>0.75) return {rating:"DATA GENIUS",em:"S",col:COLORS.gold};
+        if(p>0.55) return {rating:"DATA PRO",em:"A",col:COLORS.brightGreen};
+        if(p>0.35) return {rating:"DATA SAVVY",em:"B",col:COLORS.teal};
+        if(p>0.18) return {rating:"DATA ROOKIE",em:"C",col:COLORS.accentBlue};
+        return {rating:"DATA NEWBIE",em:"D",col:COLORS.gray};
+      };
+
+      // Helpers
+      const Scan = () => h("div",{style:{position:"absolute",inset:0,pointerEvents:"none",background:"repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.08) 2px,rgba(0,0,0,0.08) 4px)",zIndex:100}});
+      const CRT = () => h("div",{style:{position:"absolute",inset:0,pointerEvents:"none",boxShadow:`inset 0 0 60px rgba(0,180,160,0.1),inset 0 0 120px rgba(0,0,0,0.3)`,borderRadius:8,zIndex:99}});
+      const Box = ({children}) => h("div",{style:{background:COLORS.deepBlue,borderRadius:8,border:`3px solid ${COLORS.teal}`,overflow:"hidden",position:"relative",boxShadow:`0 0 30px rgba(0,180,160,0.2),0 4px 20px rgba(0,0,0,0.4)`}},h(Scan),h(CRT),children);
+      const Mute = () => h("button",{onClick:togM,style:{position:"absolute",top:8,right:8,zIndex:110,...PF,fontSize:10,padding:"4px 6px",background:"transparent",color:muted?COLORS.red:COLORS.teal,border:`1px solid ${muted?COLORS.red:COLORS.teal}`,cursor:"pointer",opacity:0.7,lineHeight:1}},muted?"♪X":"♪");
+
+      const Btn = ({text,onClick,bg=COLORS.teal,fg=COLORS.deepBlue,w,style={}}) => h("button",{onClick,style:{...PF,fontSize:10,padding:"10px 24px",background:bg,color:fg,border:"none",cursor:"pointer",boxShadow:`4px 4px 0 ${COLORS.brandBlue}`,width:w,...style}},text);
+
+      // BG
+      const BG = () => {
+        const gs=40, off=scrX%gs;
+        const vlines = Array.from({length:Math.ceil(GW/gs)+1}).map((_,i)=>h("line",{key:`v${i}`,x1:i*gs-off,y1:0,x2:i*gs-off,y2:GH,stroke:COLORS.brandBlue,strokeWidth:1,opacity:0.3}));
+        const hlines = Array.from({length:Math.ceil(GH/gs)+1}).map((_,i)=>h("line",{key:`h${i}`,x1:0,y1:i*gs,x2:GW,y2:i*gs,stroke:COLORS.brandBlue,strokeWidth:1,opacity:0.3}));
+        const lns = LANES.map((ly,i)=>h("rect",{key:`ln${i}`,x:0,y:ly-22,width:GW,height:44,fill:i===lane?COLORS.teal:COLORS.brandBlue,opacity:i===lane?0.12:0.06}));
+        const bits = [0,1,2,3,4,5].map(i=>h("text",{key:`b${i}`,x:((i*73+scrX*0.3)%(GW+40))-20,y:50+i*60,fill:COLORS.brandBlue,opacity:0.2,style:{...PF,fontSize:8}},["01","10","11","00","01","10"][i]));
+        return h("g",null,h("rect",{x:0,y:0,width:GW,height:GH,fill:COLORS.deepBlue}),vlines,hlines,lns,bits);
+      };
+
+      // Leaderboard panel
+      const LBPanel = ({onClose}) => h("div",{style:{padding:"24px 16px",textAlign:"center"}},
+        h("div",{style:{fontSize:12,color:COLORS.gold,marginBottom:4,display:"flex",alignItems:"center",justifyContent:"center",gap:8}},h(Trophy,{size:18})," LEADERBOARD ",h(Trophy,{size:18})),
+        h("div",{style:{fontSize:7,color:COLORS.gray,marginBottom:16}},"TOP DATA DASHERS"),
+        lb.length===0
+          ? h("div",{style:{fontSize:8,color:COLORS.gray,padding:"20px 0",...DF}},"No scores yet. Be the first!")
+          : h("div",{style:{maxHeight:300,overflowY:"auto"}},lb.map((en,i)=>
+              h("div",{key:i,style:{display:"grid",gridTemplateColumns:"24px 1fr auto",alignItems:"center",gap:8,padding:"8px 10px",marginBottom:4,background:i===0?COLORS.gold+"15":i===1?COLORS.offWhite+"08":i===2?COLORS.orange+"10":"transparent",border:`1px solid ${i<3?COLORS.gold+"40":COLORS.brandBlue}`,textAlign:"left"}},
+                h("div",{style:{fontSize:i<3?10:8,color:i===0?COLORS.gold:i===1?COLORS.offWhite:i===2?COLORS.orange:COLORS.gray,textAlign:"center"}},i===0?"1st":i===1?"2nd":i===2?"3rd":`${i+1}`),
+                h("div",null,h("div",{style:{fontSize:8,color:COLORS.white,marginBottom:2}},en.name),h("div",{style:{fontSize:6,color:COLORS.gray}},en.rating+" / "+en.date)),
+                h("div",{style:{fontSize:10,color:i===0?COLORS.gold:COLORS.teal,textAlign:"right"}},en.score.toLocaleString())
+              )
+            )),
+        h("button",{onClick:onClose,style:{...PF,fontSize:8,padding:"8px 20px",background:COLORS.brandBlue,color:COLORS.teal,border:`2px solid ${COLORS.teal}`,cursor:"pointer",marginTop:16}},"BACK")
+      );
+
+      // ==========================================
+      // SCREENS
+      // ==========================================
+
+      // TITLE
+      if(scr==="title") {
+        if(showLb) return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},h(Box,null,h(LBPanel,{onClose:()=>setShowLb(false)})));
+        return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},
+          h(Box,null,
+            h("div",{style:{padding:"40px 24px",textAlign:"center"}},
+              h("div",{style:{fontSize:10,color:COLORS.teal,letterSpacing:4,marginBottom:8}},"USADATA PRESENTS"),
+              h("div",{style:{fontSize:28,color:COLORS.white,marginBottom:4,lineHeight:1.4,textShadow:`0 0 20px ${COLORS.teal}, 0 2px 0 ${COLORS.brandBlue}`}},"DATA"),
+              h("div",{style:{fontSize:28,color:COLORS.teal,marginBottom:20,lineHeight:1,textShadow:`0 0 20px ${COLORS.teal}`}},"DASH"),
+              h("svg",{width:200,height:60,style:{margin:"0 auto 24px",display:"block"}},
+                h(Hero,{x:20,y:30,powered:false,scale:1.2}),
+                h(GoodLead,{x:80,y:20,enhanced:false}),
+                h(BadLead,{x:120,y:30,type:"bad_address"}),
+                h(PowerUp,{x:160,y:24,type:"teal"})
+              ),
+              h("div",{style:{fontSize:8,color:COLORS.offWhite,marginBottom:6,lineHeight:1.8,...DF}},"Collect quality leads. Dodge bad data."),
+              h("div",{style:{fontSize:8,color:COLORS.teal,marginBottom:30,lineHeight:1.8,...DF}},"Grab power-ups powered by real USADATA products."),
+              h(Btn,{text:"START GAME",onClick:startGame,style:{fontSize:14,padding:"14px 36px",display:"block",margin:"0 auto"}}),
+              h("button",{onClick:()=>{setLb(lbLoad());setShowLb(true);},style:{...PF,fontSize:8,padding:"10px 20px",background:"transparent",color:COLORS.gold,border:`2px solid ${COLORS.gold}`,cursor:"pointer",marginTop:12,display:"flex",alignItems:"center",gap:8,margin:"12px auto 0"}},h(Trophy,{size:12})," LEADERBOARD"),
+              h("div",{style:{fontSize:7,color:COLORS.gray,marginTop:20,lineHeight:1.6}},"USE ▲▼ BUTTONS, ARROW KEYS, OR SWIPE"),
+              h("div",{style:{fontSize:7,color:COLORS.teal,marginTop:16,letterSpacing:2}},"activate. accelerate. amplify.")
+            )
+          )
+        );
+      }
+
+      // LEVEL INTRO
+      if(scr==="levelIntro") {
+        const L = LEVELS[lvl];
+        return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},
+          h(Box,null,h(Mute),
+            h("div",{style:{padding:"48px 24px",textAlign:"center"}},
+              h("div",{style:{fontSize:9,color:COLORS.gray,marginBottom:12}},`LEVEL ${lvl+1} OF ${LEVELS.length}`),
+              h("div",{style:{fontSize:18,color:COLORS.gold,marginBottom:16,textShadow:`0 0 15px ${COLORS.gold}`}},L.name),
+              L.power && h("div",{style:{marginBottom:20}},
+                h("svg",{width:60,height:40,style:{display:"block",margin:"0 auto 8px"}},h(PowerUp,{x:15,y:8,type:L.power})),
+                h("div",{style:{fontSize:9,color:COLORS.teal,marginBottom:4}},"NEW: "+POWERUPS[L.power].name),
+                h("div",{style:{fontSize:8,color:COLORS.offWhite,...DF,lineHeight:1.6,maxWidth:280,margin:"0 auto"}},POWERUPS[L.power].desc)
+              ),
+              h("div",{style:{fontSize:8,color:COLORS.offWhite,marginBottom:24,...DF}},L.desc),
+              h(Btn,{text:"GO!",onClick:startLvl,style:{fontSize:11,padding:"12px 28px"}})
+            )
+          )
+        );
+      }
+
+      // GAME
+      if(scr==="game") {
+        const L = LEVELS[lvl];
+        const pct = Math.min((gTime/LVL_DUR)*100,100);
+        return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},
+          h(Box,null,
+            // HUD
+            h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:COLORS.brandBlue,borderBottom:`2px solid ${COLORS.teal}`,position:"relative",zIndex:10}},
+              h("div",{style:{fontSize:8,color:COLORS.gold}},score.toString().padStart(5,"0")),
+              h("div",{style:{fontSize:7,color:COLORS.teal}},`LV${lvl+1} ${L.name}`),
+              h("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                h("span",{style:{fontSize:8,color:COLORS.red}},"♥".repeat(lives)+"♡".repeat(3-lives)),
+                h("button",{onClick:togM,style:{...PF,fontSize:8,padding:"2px 4px",background:"transparent",color:muted?COLORS.red:COLORS.teal,border:"none",cursor:"pointer",lineHeight:1}},muted?"♪X":"♪")
+              )
+            ),
+            // Progress
+            h("div",{style:{height:3,background:COLORS.darkGray,position:"relative",zIndex:10}},
+              h("div",{style:{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${COLORS.teal},${COLORS.brightGreen})`,transition:"width 0.3s"}})
+            ),
+            // Combo
+            cmb>2 && h("div",{style:{position:"absolute",top:48,right:12,fontSize:10,color:COLORS.gold,textShadow:`0 0 8px ${COLORS.gold}`,zIndex:20}},`x${cmb} COMBO!`),
+            // Power tooltip
+            pwTip && h("div",{style:{position:"absolute",top:50,left:"50%",transform:"translateX(-50%)",background:COLORS.gold,color:COLORS.deepBlue,padding:"6px 14px",fontSize:7,zIndex:30,textAlign:"center",boxShadow:`0 0 15px ${COLORS.gold}`,maxWidth:250}},
+              h("div",{style:{fontSize:9,marginBottom:2}},POWERUPS[pwTip].name),
+              h("div",{style:{...DF,fontSize:9}},POWERUPS[pwTip].short)
+            ),
+            // Active power
+            aPow && h("div",{style:{position:"absolute",top:48,left:12,fontSize:7,color:COLORS.gold,zIndex:20}},"◆ "+POWERUPS[aPow].name),
+            // Canvas
+            h("div",{onTouchStart:onTS,onTouchEnd:onTE,style:{position:"relative",width:"100%",aspectRatio:"1",overflow:"hidden",cursor:"pointer",transform:shake?"translateX(3px)":"none",transition:"transform 0.05s"}},
+              flash && h("div",{style:{position:"absolute",inset:0,background:flash,opacity:0.15,zIndex:50,pointerEvents:"none"}}),
+              LANES.map((ly,i)=>h("div",{key:`t${i}`,onClick:()=>tapLane(i),style:{position:"absolute",left:0,top:`${((ly-50)/GH)*100}%`,width:"100%",height:`${(100/GH)*100}%`,zIndex:40}})),
+              h("svg",{viewBox:`0 0 ${GW} ${GH}`,width:"100%",height:"100%",style:{display:"block"}},
+                h(BG),
+                h(Hero,{x:HX,y:LANES[lane]-15,powered:!!aPow,scale:1}),
+                ents.map(e => {
+                  if(e.type==="good") return h(GoodLead,{key:e.id,x:e.x,y:e.y-15,enhanced:e.enh||aPow==="enhance"});
+                  if(e.type==="bad") return aPow==="hygiene"?h("g",{key:e.id,opacity:0.3},h(BadLead,{x:e.x,y:e.y-15,type:e.bt})):h(BadLead,{key:e.id,x:e.x,y:e.y-15,type:e.bt});
+                  if(e.type==="powerup") return h(PowerUp,{key:e.id,x:e.x,y:e.y-12,type:e.pt});
+                  return null;
+                }),
+                parts.map(p=>h("rect",{key:p.id,x:p.x,y:p.y,width:4,height:4,fill:p.col,opacity:p.life/600})),
+                LANES.map((ly,i)=>h("text",{key:`ll${i}`,x:GW-8,y:ly+4,fill:COLORS.teal,opacity:0.3,textAnchor:"end",style:{...PF,fontSize:7}},["TOP","MID","LOW"][i]))
+              )
+            ),
+            // Controls + Legend
+            h("div",{style:{display:"flex",alignItems:"stretch",background:COLORS.brandBlue,borderTop:`2px solid ${COLORS.teal}`,position:"relative",zIndex:10}},
+              h("div",{style:{display:"flex",flexDirection:"column",flex:"0 0 auto"}},
+                h("button",{onClick:()=>{setLane(l=>Math.max(0,l-1));SFX.play("move");},style:{...PF,fontSize:14,padding:"10px 18px",background:lane>0?COLORS.teal:COLORS.darkGray,color:lane>0?COLORS.deepBlue:COLORS.gray,border:"none",borderRight:`2px solid ${COLORS.teal}`,borderBottom:`1px solid ${COLORS.deepBlue}`,cursor:"pointer",lineHeight:1}},"▲"),
+                h("button",{onClick:()=>{setLane(l=>Math.min(2,l+1));SFX.play("move");},style:{...PF,fontSize:14,padding:"10px 18px",background:lane<2?COLORS.teal:COLORS.darkGray,color:lane<2?COLORS.deepBlue:COLORS.gray,border:"none",borderRight:`2px solid ${COLORS.teal}`,cursor:"pointer",lineHeight:1}},"▼")
+              ),
+              h("div",{style:{display:"flex",justifyContent:"center",alignItems:"center",gap:14,flex:1,padding:"6px 8px"}},
+                [{c:COLORS.green,l:"GOOD"},{c:COLORS.red,l:"BAD"},{c:COLORS.gold,l:"POWER-UP",r:true}].map((it,i)=>
+                  h("div",{key:i,style:{display:"flex",alignItems:"center",gap:4}},
+                    h("div",{style:{width:8,height:8,background:it.c,transform:it.r?"rotate(45deg)":"none"}}),
+                    h("span",{style:{fontSize:6,color:COLORS.offWhite}},it.l)
+                  )
+                )
+              )
+            )
+          )
+        );
+      }
+
+      // QUIZ
+      if(scr==="quiz" && curQ) {
+        return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},
+          h(Box,null,h(Mute),
+            h("div",{style:{padding:"32px 20px",textAlign:"center"}},
+              h("div",{style:{fontSize:9,color:COLORS.gold,marginBottom:4}},"DATA CHECK"),
+              h("div",{style:{fontSize:7,color:COLORS.gray,marginBottom:20}},`AFTER LEVEL ${lvl+1}`),
+              h("div",{style:{fontSize:9,color:COLORS.offWhite,marginBottom:24,lineHeight:1.8,...DF}},curQ.q),
+              h("div",{style:{display:"flex",flexDirection:"column",gap:10,marginBottom:20}},
+                curQ.a.map((a,i) => {
+                  let bg=COLORS.brandBlue, bd=COLORS.accentBlue, op=1;
+                  if(qAns!==null) {
+                    if(i===curQ.c){bg=COLORS.green;bd=COLORS.brightGreen;}
+                    else if(i===qAns&&i!==curQ.c){bg=COLORS.red;bd=COLORS.darkRed;}
+                    else op=0.4;
+                  }
+                  return h("button",{key:i,onClick:()=>qAns===null&&ansQ(i),style:{...PF,fontSize:8,padding:"10px 16px",background:bg,color:COLORS.white,border:`2px solid ${bd}`,cursor:qAns===null?"pointer":"default",textAlign:"left",lineHeight:1.6,opacity:op}},String.fromCharCode(65+i)+". "+a);
+                })
+              ),
+              qAns!==null && h(React.Fragment,null,
+                h("div",{style:{fontSize:8,color:qAns===curQ.c?COLORS.brightGreen:COLORS.orange,marginBottom:8}},qAns===curQ.c?"CORRECT! +50 PTS":"NOT QUITE!"),
+                h("div",{style:{fontSize:8,color:COLORS.offWhite,...DF,lineHeight:1.6,marginBottom:20,maxWidth:300,margin:"0 auto 20px"}},curQ.e),
+                h(Btn,{text:lvl>=LEVELS.length-1?"SEE RESULTS":"NEXT LEVEL",onClick:nextQ})
+              )
+            )
+          )
+        );
+      }
+
+      // RESULTS
+      if(scr==="results") {
+        if(showLb) return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},h(Box,null,h(LBPanel,{onClose:()=>setShowLb(false)})));
+        const diq = getIQ();
+        const stats = [
+          {l:"SCORE",v:score,c:COLORS.gold},{l:"QUIZ",v:`${qSc}/${qTot}`,c:COLORS.teal},
+          {l:"LEADS",v:good,c:COLORS.green},{l:"MAX COMBO",v:`x${mxCmb}`,c:COLORS.orange},
+          {l:"BAD DODGED",v:badD,c:COLORS.brightGreen},{l:"BAD CAUGHT",v:badC,c:COLORS.red},
+        ];
+        return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},
+          h(Box,null,h(Mute),
+            h("div",{style:{padding:"28px 20px",textAlign:"center"}},
+              h("div",{style:{fontSize:9,color:COLORS.gray,marginBottom:8}},"GAME OVER"),
+              h("div",{style:{fontSize:20,color:COLORS.gold,marginBottom:4,textShadow:`0 0 15px ${COLORS.gold}`}},diq.rating),
+              h("div",{style:{width:44,height:44,margin:"6px auto 12px",background:diq.col,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,color:COLORS.deepBlue,boxShadow:`0 0 20px ${diq.col}`}},diq.em),
+              h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:14}},
+                stats.map((s,i)=>h("div",{key:i,style:{background:COLORS.brandBlue,padding:"6px 4px",border:`1px solid ${COLORS.accentBlue}`}},
+                  h("div",{style:{fontSize:6,color:COLORS.gray,marginBottom:3}},s.l),
+                  h("div",{style:{fontSize:11,color:s.c}},s.v)
+                ))
+              ),
+              newHi&&!lbDone&&h("div",{style:{background:COLORS.gold+"15",border:`2px solid ${COLORS.gold}`,padding:"12px",marginBottom:14}},
+                h("div",{style:{fontSize:9,color:COLORS.gold,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:6}},h(Trophy,{size:14})," NEW HIGH SCORE! ",h(Trophy,{size:14})),
+                h("div",{style:{display:"flex",gap:6}},
+                  h("input",{type:"text",placeholder:"YOUR NAME",maxLength:12,value:lbNm,onChange:e=>setLbNm(e.target.value.toUpperCase()),onKeyDown:e=>e.key==="Enter"&&saveLb(),style:{...PF,fontSize:8,flex:1,padding:"8px",background:COLORS.brandBlue,color:COLORS.white,border:`2px solid ${COLORS.accentBlue}`,outline:"none",textTransform:"uppercase"}}),
+                  h("button",{onClick:saveLb,disabled:!lbNm.trim(),style:{...PF,fontSize:8,padding:"8px 12px",background:lbNm.trim()?COLORS.gold:COLORS.gray,color:COLORS.deepBlue,border:"none",cursor:lbNm.trim()?"pointer":"not-allowed"}},"SAVE")
+                )
+              ),
+              lbDone&&h("div",{style:{fontSize:8,color:COLORS.brightGreen,marginBottom:12}},"SCORE SAVED TO LEADERBOARD!"),
+              h("div",{style:{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}},
+                h(Btn,{text:"PLAY AGAIN",onClick:startGame,w:220}),
+                h("button",{onClick:()=>{setLb(lbLoad());setShowLb(true);},style:{...PF,fontSize:8,padding:"8px 20px",background:"transparent",color:COLORS.gold,border:`2px solid ${COLORS.gold}`,cursor:"pointer",width:220,display:"flex",alignItems:"center",justifyContent:"center",gap:6}},h(Trophy,{size:12})," LEADERBOARD"),
+                h("button",{onClick:()=>setScr("leadForm"),style:{...PF,fontSize:8,padding:"8px 20px",background:"transparent",color:COLORS.teal,border:`2px solid ${COLORS.teal}`,cursor:"pointer",width:220}},"LEVEL UP YOUR DATA")
+              ),
+              h("div",{style:{fontSize:7,color:COLORS.teal,marginTop:16,letterSpacing:2}},"activate. accelerate. amplify.")
+            )
+          )
+        );
+      }
+
+      // LEAD FORM
+      if(scr==="leadForm") {
+        return h("div",{style:{width:"100%",maxWidth:440,margin:"0 auto",...PF,position:"relative"}},
+          h(Box,null,h(Mute),
+            h("div",{style:{padding:"32px 24px",textAlign:"center"}},
+              !sent ? h(React.Fragment,null,
+                h("div",{style:{fontSize:14,color:COLORS.teal,marginBottom:8,textShadow:`0 0 10px ${COLORS.teal}`}},"POWER UP"),
+                h("div",{style:{fontSize:8,color:COLORS.offWhite,...DF,lineHeight:1.6,marginBottom:24}},"Ready to see what clean, enriched data can do for your business? Connect with a USADATA Data Specialist."),
+                [{k:"name",p:"YOUR NAME",t:"text"},{k:"email",p:"EMAIL",t:"email"},{k:"company",p:"COMPANY",t:"text"}].map(f=>
+                  h("input",{key:f.k,type:f.t,placeholder:f.p,value:form[f.k],onChange:e=>setForm(d=>({...d,[f.k]:e.target.value})),style:{...PF,fontSize:8,width:"100%",padding:"10px 12px",marginBottom:10,background:COLORS.brandBlue,color:COLORS.white,border:`2px solid ${COLORS.accentBlue}`,outline:"none",boxSizing:"border-box"}})
+                ),
+                h("button",{onClick:()=>{setSent(true);SFX.play("powerup");},disabled:!form.email,style:{...PF,fontSize:10,padding:"12px 28px",background:form.email?COLORS.teal:COLORS.gray,color:COLORS.deepBlue,border:"none",cursor:form.email?"pointer":"not-allowed",boxShadow:`4px 4px 0 ${COLORS.brandBlue}`,marginTop:8,width:"100%"}},"SEND IT"),
+                h("button",{onClick:()=>setScr("results"),style:{...PF,fontSize:7,padding:"8px",background:"transparent",color:COLORS.gray,border:"none",cursor:"pointer",marginTop:12}},"BACK TO RESULTS")
+              ) : h(React.Fragment,null,
+                h("div",{style:{fontSize:16,color:COLORS.gold,marginBottom:12,textShadow:`0 0 15px ${COLORS.gold}`}},"QUEST ACCEPTED!"),
+                h("div",{style:{fontSize:9,color:COLORS.offWhite,...DF,lineHeight:1.8,marginBottom:24}},"A USADATA Data Specialist will reach out soon. In the meantime, explore what 260+ million records and 25+ years of expertise can do for your marketing."),
+                h("a",{href:"https://www.usadata.com/contact-us-home",target:"_blank",rel:"noopener noreferrer",style:{...PF,fontSize:9,display:"inline-block",padding:"12px 24px",background:COLORS.teal,color:COLORS.deepBlue,textDecoration:"none",boxShadow:`4px 4px 0 ${COLORS.brandBlue}`,marginBottom:12}},"VISIT USADATA.COM"),
+                h("br"),
+                h("button",{onClick:()=>{setSent(false);setForm({name:"",email:"",company:""});startGame();},style:{...PF,fontSize:8,padding:"8px 16px",background:"transparent",color:COLORS.teal,border:`2px solid ${COLORS.teal}`,cursor:"pointer",marginTop:8}},"PLAY AGAIN"),
+                h("div",{style:{fontSize:7,color:COLORS.teal,marginTop:24,letterSpacing:2}},"activate. accelerate. amplify.")
+              )
+            )
+          )
+        );
+      }
+
+      return null;
+    }
+
+    // Mount
+    ReactDOM.render(h(DataDash), document.getElementById("root"));
+  </script>
+</body>
+</html>
