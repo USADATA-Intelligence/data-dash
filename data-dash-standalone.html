@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title>Data Dash | USADATA</title>
+<meta name="description" content="Data Dash - Collect quality leads, dodge bad data! A retro arcade game by USADATA."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden}
+body{background:#060D18;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P','Courier New',monospace;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+#root{width:100%;max-width:480px;padding:8px}
+button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React 18 -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Babel for JSX compilation -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+
+
+
+// ==========================================
+// USADATA DATA DASH - 8-Bit Retro Game
+// with Sound Effects + Leaderboard
+// ==========================================
+
+// Brand Colors
+const COLORS = {
+  deepBlue: "#0A1628",
+  brandBlue: "#1B3A5C",
+  accentBlue: "#2E6BA6",
+  teal: "#00B4A0",
+  green: "#3EBD7C",
+  brightGreen: "#50E3A4",
+  white: "#FFFFFF",
+  offWhite: "#E8F0F8",
+  gold: "#FFD700",
+  red: "#FF4444",
+  darkRed: "#CC2222",
+  orange: "#FF8C42",
+  purple: "#8B5CF6",
+  gray: "#6B7B8D",
+  darkGray: "#2A3A4A",
+};
+
+const pixelFont = {
+  fontFamily: "'Press Start 2P', 'Courier New', monospace",
+  imageRendering: "pixelated",
+};
+
+const FontLoader = () => (
+  <link
+    href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=DM+Sans:wght@400;500;700&display=swap"
+    rel="stylesheet"
+  />
+);
+
+// ==========================================
+// 8-BIT SOUND ENGINE
+// ==========================================
+
+class SoundEngine {
+  constructor() {
+    this.initialized = false;
+    this.muted = false;
+    this.ctx = null;
+    this.master = null;
+    this.powerLoop = null;
+    this.powerGen = 0;
+    this.lastPlayed = {};
+  }
+
+  async init() {
+    if (this.initialized) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      // Master gain + compressor to prevent clipping
+      const comp = this.ctx.createDynamicsCompressor();
+      comp.threshold.value = -24;
+      comp.knee.value = 12;
+      comp.ratio.value = 8;
+      comp.attack.value = 0.005;
+      comp.release.value = 0.1;
+      comp.connect(this.ctx.destination);
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.3;
+      this.master.connect(comp);
+      this.initialized = true;
+    } catch (e) {
+      console.warn("Audio init failed:", e);
+    }
+  }
+
+  // Create a single clean tone - fresh oscillator each time, no reuse
+  _tone(freq, dur, vol = 0.15, type = "sine", delay = 0) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime + delay;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.015); // fade in 15ms
+    gain.gain.linearRampToValueAtTime(0, t + dur);      // fade out
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  play(sound) {
+    if (!this.initialized || this.muted) return;
+
+    // Cooldown per sound type
+    const now = performance.now();
+    const cd = { collect: 90, hit: 120, move: 50, combo: 80, hygieneBlock: 80 }[sound] || 0;
+    if (cd > 0) {
+      if (now - (this.lastPlayed[sound] || 0) < cd) return;
+      this.lastPlayed[sound] = now;
+    }
+
+    // Note frequencies
+    const F = {
+      E2:82.4, D3:146.8, Db3:138.6, E3:164.8, G3:196, A3:220, C4:261.6, E4:329.6,
+      G4:392, A4:440, B4:493.9, C5:523.3, D5:587.3, E5:659.3, "F#5":740, G5:784,
+      A5:880, B5:987.8, C6:1046.5, D6:1174.7, E6:1318.5, G6:1568, B6:1975.5, D7:2349.3, G7:3136
+    };
+
+    switch (sound) {
+      case "collect":
+        this._tone(F.E5, 0.1, 0.12, "sine");
+        break;
+      case "hit":
+        this._tone(F.E2, 0.2, 0.2, "sine");
+        break;
+      case "powerup":
+        this._tone(F.C5, 0.1, 0.1, "sine", 0);
+        this._tone(F.E5, 0.1, 0.1, "sine", 0.1);
+        this._tone(F.G5, 0.1, 0.1, "sine", 0.2);
+        this._tone(F.C6, 0.15, 0.12, "sine", 0.3);
+        break;
+      case "quizCorrect":
+        this._tone(F.G5, 0.12, 0.1, "sine", 0);
+        this._tone(F.B5, 0.12, 0.1, "sine", 0.14);
+        this._tone(F.D6, 0.18, 0.12, "sine", 0.28);
+        break;
+      case "quizWrong":
+        this._tone(F.D3, 0.2, 0.15, "sine", 0);
+        this._tone(F.Db3, 0.25, 0.15, "sine", 0.2);
+        break;
+      case "levelUp":
+        [F.C5, F.D5, F.E5, F.G5, F.C6].forEach((f, i) => {
+          this._tone(f, 0.12, 0.1, "sine", i * 0.12);
+        });
+        break;
+      case "gameOver":
+        [F.E4, F.C4, F.A3, F.E3].forEach((f, i) => {
+          this._tone(f, 0.3, 0.15, "sine", i * 0.3);
+        });
+        break;
+      case "start":
+        [F.G4, F.B4, F.D5, F.G5].forEach((f, i) => {
+          this._tone(f, 0.1, 0.1, "sine", i * 0.1);
+        });
+        break;
+      case "move":
+        this._tone(F.A4, 0.04, 0.08, "sine");
+        break;
+      case "combo":
+        this._tone(F.E6, 0.08, 0.1, "sine");
+        break;
+      case "hygieneBlock":
+        this._tone(F.A5, 0.06, 0.08, "sine");
+        break;
+      case "highscore":
+        [F.G5, F.B5, F.D6, F.G6, F.B6, F.D7].forEach((f, i) => {
+          this._tone(f, 0.1, 0.08, "sine", i * 0.1);
+        });
+        break;
+      default: break;
+    }
+  }
+
+  startPowerMusic() {
+    if (!this.initialized || this.muted) return;
+    this.powerGen++;
+    const myGen = this.powerGen;
+    if (this.powerLoop) { clearTimeout(this.powerLoop); this.powerLoop = null; }
+
+    // Distinct low register pattern so it doesn't clash with collect SFX
+    const notes = [164.8, 196, 220, 261.6, 220, 196, 164.8, 146.8, 164.8, 196, 261.6, 329.6, 261.6, 196, 164.8, 130.8];
+    const bassN = [82.4, null, 110, null, 73.4, null, 98, null, 82.4, null, 110, null, 65.4, null, 82.4, null];
+    const tempo = 70;
+    let step = 0;
+
+    const tick = () => {
+      if (myGen !== this.powerGen || this.muted) return;
+      const m = notes[step % notes.length];
+      const b = bassN[step % bassN.length];
+      if (m) this._tone(m, 0.04, 0.06, "sine");
+      if (b) this._tone(b, 0.06, 0.08, "sine");
+      step++;
+      this.powerLoop = setTimeout(tick, tempo);
+    };
+    tick();
+  }
+
+  stopPowerMusic() {
+    this.powerGen++;
+    if (this.powerLoop) { clearTimeout(this.powerLoop); this.powerLoop = null; }
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    if (this.muted) this.stopPowerMusic();
+    return this.muted;
+  }
+}
+
+const soundEngine = new SoundEngine();
+
+// ==========================================
+// LEADERBOARD HELPERS
+// ==========================================
+
+const LEADERBOARD_KEY = "datadash-leaderboard-v1";
+const MAX_LEADERBOARD = 10;
+
+function loadLeaderboard() {
+  try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY)) || []; }
+  catch(e) { return []; }
+}
+
+function saveToLeaderboard(entry) {
+  try {
+    let board = loadLeaderboard();
+    board.push({ name: entry.name || "ANON", score: entry.score, rating: entry.rating, date: new Date().toISOString().split("T")[0] });
+    board.sort((a, b) => b.score - a.score);
+    board = board.slice(0, MAX_LEADERBOARD);
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(board));
+    return board;
+  } catch(e) { return []; }
+}
+
+function isHighScore(board, score) {
+  if (!board || board.length < MAX_LEADERBOARD) return true;
+  return score > board[board.length - 1].score;
+}
+
+// ==========================================
+// PIXEL ART COMPONENTS (SVG-based)
+// ==========================================
+
+const PixelHero = ({ x, y, powered, scale = 1 }) => {
+  const s = 4 * scale;
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      <rect x={2*s} y={0} width={4*s} height={s} fill={COLORS.teal} />
+      <rect x={s} y={s} width={6*s} height={s} fill={COLORS.teal} />
+      <rect x={s} y={2*s} width={6*s} height={s} fill={powered ? COLORS.gold : COLORS.accentBlue} />
+      <rect x={2*s} y={3*s} width={4*s} height={s} fill={powered ? COLORS.gold : COLORS.accentBlue} />
+      <rect x={2*s} y={-2*s} width={4*s} height={2*s} fill={COLORS.offWhite} />
+      <rect x={3*s} y={-2*s} width={s} height={s} fill={COLORS.deepBlue} />
+      <rect x={5*s} y={-s} width={s} height={s} fill={COLORS.deepBlue} />
+      <rect x={2*s} y={4*s} width={s} height={2*s} fill={COLORS.brandBlue} />
+      <rect x={5*s} y={4*s} width={s} height={2*s} fill={COLORS.brandBlue} />
+      {powered && (
+        <>
+          <rect x={0} y={-3*s} width={8*s} height={9*s} fill={COLORS.gold} opacity={0.15} rx={s} />
+          <rect x={-s} y={-s} width={s} height={s} fill={COLORS.gold} opacity={0.6} />
+          <rect x={8*s} y={0} width={s} height={s} fill={COLORS.gold} opacity={0.6} />
+          <rect x={0} y={5*s} width={s} height={s} fill={COLORS.gold} opacity={0.4} />
+        </>
+      )}
+    </g>
+  );
+};
+
+const PixelGoodLead = ({ x, y, enhanced }) => {
+  const s = 3;
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      <rect x={0} y={0} width={8*s} height={10*s} fill={COLORS.green} />
+      <rect x={s} y={s} width={6*s} height={3*s} fill={COLORS.brightGreen} />
+      <rect x={2*s} y={5*s} width={s} height={2*s} fill={COLORS.white} />
+      <rect x={3*s} y={6*s} width={s} height={s} fill={COLORS.white} />
+      <rect x={4*s} y={5*s} width={s} height={s} fill={COLORS.white} />
+      <rect x={5*s} y={4*s} width={s} height={s} fill={COLORS.white} />
+      {enhanced && (
+        <>
+          <rect x={-s} y={-s} width={10*s} height={12*s} fill="none" stroke={COLORS.gold} strokeWidth={2} />
+          <rect x={7*s} y={-s} width={3*s} height={3*s} fill={COLORS.gold} />
+          <rect x={8*s} y={0} width={s} height={s} fill={COLORS.deepBlue} />
+        </>
+      )}
+    </g>
+  );
+};
+
+const PixelBadLead = ({ x, y, type }) => {
+  const s = 3;
+  const color = type === "duplicate" ? COLORS.orange : type === "outdated" ? COLORS.gray : COLORS.red;
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      <rect x={0} y={0} width={8*s} height={10*s} fill={color} />
+      <rect x={s} y={s} width={6*s} height={3*s} fill={COLORS.darkGray} opacity={0.4} />
+      <rect x={2*s} y={5*s} width={s} height={s} fill={COLORS.white} />
+      <rect x={5*s} y={5*s} width={s} height={s} fill={COLORS.white} />
+      <rect x={3*s} y={6*s} width={2*s} height={s} fill={COLORS.white} />
+      <rect x={2*s} y={7*s} width={s} height={s} fill={COLORS.white} />
+      <rect x={5*s} y={7*s} width={s} height={s} fill={COLORS.white} />
+      <rect x={-s} y={2*s} width={10*s} height={1} fill={COLORS.white} opacity={0.3} />
+      <rect x={-s} y={7*s} width={10*s} height={1} fill={COLORS.white} opacity={0.2} />
+    </g>
+  );
+};
+
+const PixelPowerUp = ({ x, y, type }) => {
+  const s = 3;
+  const colors = {
+    hygiene: COLORS.teal,
+    enhance: COLORS.purple,
+    hailey: COLORS.gold,
+    predict: COLORS.brightGreen,
+    sl360: COLORS.accentBlue,
+  };
+  const fill = colors[type] || COLORS.teal;
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      <rect x={3*s} y={0} width={2*s} height={s} fill={fill} />
+      <rect x={2*s} y={s} width={4*s} height={s} fill={fill} />
+      <rect x={s} y={2*s} width={6*s} height={s} fill={fill} />
+      <rect x={0} y={3*s} width={8*s} height={2*s} fill={fill} />
+      <rect x={s} y={5*s} width={6*s} height={s} fill={fill} />
+      <rect x={2*s} y={6*s} width={4*s} height={s} fill={fill} />
+      <rect x={3*s} y={7*s} width={2*s} height={s} fill={fill} />
+      <rect x={3*s} y={2*s} width={s} height={s} fill={COLORS.white} opacity={0.5} />
+      <rect x={2*s} y={3*s} width={s} height={s} fill={COLORS.white} opacity={0.3} />
+      <rect x={-s} y={-s} width={s} height={s} fill={COLORS.white} opacity={0.6}>
+        <animate attributeName="opacity" values="0.6;0;0.6" dur="0.5s" repeatCount="indefinite" />
+      </rect>
+      <rect x={8*s} y={7*s} width={s} height={s} fill={COLORS.white} opacity={0.4}>
+        <animate attributeName="opacity" values="0;0.6;0" dur="0.5s" repeatCount="indefinite" />
+      </rect>
+    </g>
+  );
+};
+
+// ==========================================
+// TROPHY ICON
+// ==========================================
+
+const TrophyIcon = ({ size = 16, color = COLORS.gold }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" style={{ display: "inline-block", verticalAlign: "middle" }}>
+    <rect x={4} y={0} width={8} height={2} fill={color} />
+    <rect x={2} y={2} width={12} height={2} fill={color} />
+    <rect x={0} y={2} width={3} height={6} fill={color} />
+    <rect x={13} y={2} width={3} height={6} fill={color} />
+    <rect x={3} y={4} width={10} height={4} fill={color} />
+    <rect x={4} y={8} width={8} height={2} fill={color} />
+    <rect x={6} y={10} width={4} height={2} fill={color} />
+    <rect x={4} y={12} width={8} height={2} fill={color} />
+    <rect x={5} y={5} width={2} height={2} fill={COLORS.deepBlue} opacity={0.3} />
+  </svg>
+);
+
+// ==========================================
+// GAME DATA
+// ==========================================
+
+const POWER_UPS = {
+  hygiene: { name: "DATA HYGIENE", desc: "NCOA processing removes bad addresses and outdated records", short: "Cleans junk data!" },
+  enhance: { name: "ENHANCEMENT", desc: "Appends demographics, lifestyle, and purchase behavior to your records", short: "Reveals hidden traits!" },
+  hailey: { name: "HAILEY AI", desc: "AI-powered audience builder finds high-intent prospects fast", short: "AI targets top leads!" },
+  predict: { name: "PREDICTIVE MODEL", desc: "Machine learning forecasts which leads are most likely to convert", short: "Predicts conversions!" },
+  sl360: { name: "SL360", desc: "Self-serve platform to build audiences and order leads in minutes", short: "Build lists instantly!" },
+};
+
+const QUIZ_QUESTIONS = [
+  { question: "You just mailed 10,000 postcards and 2,200 came back undeliverable. Ouch. What should you have done first?", answers: ["Crossed your fingers", "Run Data Hygiene", "Printed more"], correct: 1, explanation: "Data Hygiene catches bad addresses before you waste postage. NCOA processing alone can save thousands." },
+  { question: "Your HVAC company has a customer list but you have no idea who has high income or owns their home. How do you find out?", answers: ["Ask them nicely", "Data Enhancement", "Check social media"], correct: 1, explanation: "Data Enhancement appends 200+ attributes like income, homeownership, and lifestyle to your existing records." },
+  { question: "It's 4pm on Friday. Your boss needs a targeted mailing list of homeowners in Phoenix by Monday. You...", answers: ["Panic", "Use Hailey AI", "Call a meeting"], correct: 1, explanation: "Hailey AI builds highly targeted audiences in minutes. Tell it what you sell, and it picks the right filters." },
+  { question: "You keep mailing the same person at 3 different addresses. They're not amused. What fixes this?", answers: ["Apologize profusely", "Customer Linkage", "Send a gift basket"], correct: 1, explanation: "Customer Linkage unifies duplicate records into a single 360-degree view so nobody gets triple-mailed." },
+  { question: "A casino wants to find people who look like their best high-rollers. What do they need first?", answers: ["A lucky guess", "A Portrait Report", "A bigger casino"], correct: 1, explanation: "Portrait Reports analyze your best customers' traits so you can find more people just like them." },
+  { question: "You need to buy a list of 5,000 new movers in Dallas. It's 11pm. Where do you go?", answers: ["SL360 (it never sleeps)", "The office (hope someone's there)", "Give up until Monday"], correct: 0, explanation: "SL360 is USADATA's 24/7 self-serve platform. Build lists, order leads, and download data anytime." },
+  { question: "Your dental practice has 8,000 patients but you're only reaching 30% with campaigns. A model could predict who's most likely to book. What is it?", answers: ["A crystal ball", "A Predictive Model", "A really good guess"], correct: 1, explanation: "Predictive Models use machine learning to score which patients are most likely to convert on your next offer." },
+  { question: "True or false: USADATA's database covers over 260 million U.S. consumers and is updated monthly.", answers: ["That can't be real", "True, and it's verified", "Only during a full moon"], correct: 1, explanation: "260M+ consumer records across 190M households, refreshed monthly, CASS certified, and privacy compliant." },
+  { question: "Your insurance agency just merged two offices. Now you have duplicate records everywhere. What's the play?", answers: ["Hire 10 interns", "Data Hygiene merge/purge", "Pretend it's fine"], correct: 1, explanation: "Merge/purge processing deduplicates your records, saving money and preventing embarrassing double-contacts." },
+  { question: "You want to target renters aged 25-34 within 5 miles of your new apartment complex. Who makes that easy?", answers: ["Your cousin who's good with Excel", "USADATA's audience filters", "Post flyers and hope"], correct: 1, explanation: "USADATA lets you filter by age, housing status, income, geography, and hundreds more attributes in minutes." },
+];
+
+const LEVELS = [
+  { name: "RAW DATA", speed: 220, spawnRate: 400, powerUp: null, badRatio: 0.45, desc: "Sort the clean leads from the junk!" },
+  { name: "CLEAN SWEEP", speed: 270, spawnRate: 360, powerUp: "hygiene", badRatio: 0.5, desc: "Data Hygiene power-up incoming!" },
+  { name: "DEEP INSIGHT", speed: 320, spawnRate: 300, powerUp: "enhance", badRatio: 0.5, desc: "Enhancement reveals hidden data!" },
+  { name: "SMART TARGET", speed: 380, spawnRate: 260, powerUp: "hailey", badRatio: 0.5, desc: "Hailey AI finds the best leads!" },
+  { name: "PREDICT & WIN", speed: 440, spawnRate: 220, powerUp: "predict", badRatio: 0.45, desc: "Predictive Models light the way!" },
+];
+
+// ==========================================
+// MAIN GAME COMPONENT
+// ==========================================
+
+function DataDash() {
+  // ==========================================
+  // GAME ENGINE: All gameplay state in a mutable ref (G).
+  // The animation loop mutates G directly and triggers one
+  // forceRender() per frame. No setState inside the loop.
+  // This prevents re-render pauses when changing lanes.
+  // ==========================================
+
+  const [, setTick] = useState(0);
+  const forceRender = () => setTick((t) => t + 1);
+
+  const G = useRef({
+    screen: "title",
+    score: 0, lives: 3, level: 0, lane: 1,
+    entities: [], particles: [],
+    activePower: null, powerTimer: 0,
+    combo: 0, maxCombo: 0,
+    goodCaught: 0, badDodged: 0, badCaught: 0,
+    quizScore: 0, quizTotal: 0,
+    gameTime: 0, scrollX: 0,
+    flashColor: null, shakeScreen: false,
+    showPowerTooltip: null,
+    spawnTimer: 0, entityId: 0,
+  }).current;
+
+  const animRef = useRef(null);
+  const lastTime = useRef(0);
+
+  // Non-gameplay state (menus, forms, etc.)
+  const [currentQuiz, setCurrentQuiz] = useState(null);
+  const [quizAnswer, setQuizAnswer] = useState(null);
+  const [usedQuestions, setUsedQuestions] = useState([]);
+  const usedQRef = useRef([]);
+  const [leadFormData, setLeadFormData] = useState({ name: "", email: "", company: "" });
+  const [formSubmitted, setFormSubmitted] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [lbLoading, setLbLoading] = useState(false);
+  const [newHighScore, setNewHighScore] = useState(false);
+  const [lbName, setLbName] = useState("");
+  const [lbSaved, setLbSaved] = useState(false);
+
+  const GAME_W = 400;
+  const GAME_H = 400;
+  const LANES = [100, 200, 300];
+  const HERO_X = 60;
+  const LEVEL_DURATION = 18000;
+
+  useEffect(() => { setLeaderboard(loadLeaderboard()); }, []);
+
+  const initAudio = async () => {
+    if (!audioReady) { await soundEngine.init(); setAudioReady(true); }
+  };
+  const toggleMute = () => { setMuted(soundEngine.toggleMute()); };
+
+  // ==========================================
+  // LANE MOVEMENT (mutates G, no React setState)
+  // ==========================================
+
+  const moveUp = useCallback(() => {
+    if (G.screen !== "game") return;
+    G.lane = Math.max(0, G.lane - 1);
+    soundEngine.play("move");
+  }, []);
+
+  const moveDown = useCallback(() => {
+    if (G.screen !== "game") return;
+    G.lane = Math.min(2, G.lane + 1);
+    soundEngine.play("move");
+  }, []);
+
+  const handleLaneTap = useCallback((idx) => {
+    if (G.screen !== "game") return;
+    G.lane = idx;
+    soundEngine.play("move");
+  }, []);
+
+  // ==========================================
+  // GAME LOOP (self-sustaining, reads/writes G)
+  // ==========================================
+
+  const gameLoop = useCallback((timestamp) => {
+    if (G.screen !== "game") { animRef.current = null; return; }
+
+    if (!lastTime.current) lastTime.current = timestamp;
+    const dt = Math.min(timestamp - lastTime.current, 50);
+    lastTime.current = timestamp;
+    if (dt === 0) { animRef.current = requestAnimationFrame(gameLoop); return; }
+
+    const lvl = LEVELS[G.level];
+    const dtSec = dt / 1000;
+
+    // Level timer
+    G.gameTime += dt;
+    if (G.gameTime >= LEVEL_DURATION) {
+      G.gameTime = 0;
+      G.screen = "quiz";
+      soundEngine.play("levelUp");
+      soundEngine.stopPowerMusic();
+      pickQuiz();
+      forceRender();
+      return;
+    }
+
+    // Scroll
+    G.scrollX += lvl.speed * dtSec * 0.5;
+
+    // Spawn
+    G.spawnTimer += dt;
+    if (G.spawnTimer >= lvl.spawnRate) {
+      G.spawnTimer = 0;
+      const lane = Math.floor(Math.random() * 3);
+      const isGood = Math.random() > lvl.badRatio;
+      const isPowerUp = lvl.powerUp && Math.random() < 0.15;
+      if (isPowerUp) {
+        G.entities.push({ id: G.entityId++, type: "powerup", powerType: lvl.powerUp, x: GAME_W + 30, y: LANES[lane], lane, width: 24, height: 24 });
+      } else {
+        const bt = ["bad_address", "duplicate", "outdated"];
+        G.entities.push({ id: G.entityId++, type: isGood ? "good" : "bad", badType: isGood ? null : bt[Math.floor(Math.random() * 3)], x: GAME_W + 30, y: LANES[lane], lane, width: 24, height: 30, enhanced: G.activePower === "enhance" && isGood });
+      }
+    }
+
+    // Move + collide
+    const moveAmt = lvl.speed * dtSec;
+    const alive = [];
+    for (const e of G.entities) {
+      e.x -= moveAmt;
+      if (e.x < -40) { if (e.type === "bad") G.badDodged++; continue; }
+
+      const hitX = e.x < HERO_X + 28 && e.x + e.width > HERO_X;
+      const hitY = e.lane === G.lane;
+
+      if (hitX && hitY) {
+        if (e.type === "good") {
+          G.score += G.activePower === "predict" ? 30 : G.activePower === "hailey" ? 25 : 15;
+          G.goodCaught++; G.combo++;
+          if (G.combo > G.maxCombo) G.maxCombo = G.combo;
+          if (G.combo > 1 && G.combo % 5 === 0) soundEngine.play("combo");
+          soundEngine.play("collect");
+          G.flashColor = COLORS.green; setTimeout(() => { G.flashColor = null; }, 100);
+          for (let i = 0; i < 4; i++) G.particles.push({ id: Date.now() + i, x: e.x, y: e.y, dx: (Math.random() - 0.5) * 4, dy: (Math.random() - 0.5) * 4, color: COLORS.green, life: 500 });
+        } else if (e.type === "bad") {
+          if (G.activePower === "hygiene") {
+            G.score += 5; G.badDodged++; soundEngine.play("hygieneBlock");
+            G.flashColor = COLORS.teal; setTimeout(() => { G.flashColor = null; }, 100);
+          } else {
+            G.lives--; G.badCaught++; G.combo = 0;
+            soundEngine.play("hit");
+            G.shakeScreen = true; G.flashColor = COLORS.red;
+            setTimeout(() => { G.shakeScreen = false; G.flashColor = null; }, 200);
+            for (let i = 0; i < 3; i++) G.particles.push({ id: Date.now() + i + 100, x: e.x, y: e.y, dx: (Math.random() - 0.5) * 3, dy: (Math.random() - 0.5) * 3, color: COLORS.red, life: 400 });
+            if (G.lives <= 0) {
+              G.lives = 0; G.screen = "results";
+              soundEngine.play("gameOver");
+              soundEngine.stopPowerMusic();
+              checkHighScore();
+              forceRender();
+              return;
+            }
+          }
+        } else if (e.type === "powerup") {
+          G.activePower = e.powerType; G.powerTimer = 5000;
+          G.showPowerTooltip = e.powerType;
+          setTimeout(() => { G.showPowerTooltip = null; }, 2500);
+          soundEngine.play("powerup");
+          soundEngine.startPowerMusic();
+          G.flashColor = COLORS.gold; setTimeout(() => { G.flashColor = null; }, 150);
+          for (let i = 0; i < 6; i++) G.particles.push({ id: Date.now() + i + 200, x: e.x, y: e.y, dx: (Math.random() - 0.5) * 5, dy: (Math.random() - 0.5) * 5, color: COLORS.gold, life: 600 });
+        }
+      } else {
+        alive.push(e);
+      }
+    }
+    G.entities = alive;
+
+    // Power timer
+    if (G.activePower) { G.powerTimer -= dt; if (G.powerTimer <= 0) { G.activePower = null; G.powerTimer = 0; soundEngine.stopPowerMusic(); } }
+
+    // Particles
+    G.particles = G.particles.filter((p) => { p.x += p.dx; p.y += p.dy; p.life -= dt; return p.life > 0; });
+
+    forceRender();
+    animRef.current = requestAnimationFrame(gameLoop);
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { if (animRef.current) { cancelAnimationFrame(animRef.current); animRef.current = null; } };
+  }, []);
+
+  // ==========================================
+  // INPUT HANDLING
+  // ==========================================
+
+  useEffect(() => {
+    const fn = (e) => {
+      if (e.key === "ArrowUp" || e.key === "w") moveUp();
+      else if (e.key === "ArrowDown" || e.key === "s") moveDown();
+    };
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, []);
+
+  const touchStart = useRef(null);
+  const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientY; };
+  const handleTouchEnd = (e) => {
+    if (!touchStart.current) return;
+    const diff = e.changedTouches[0].clientY - touchStart.current;
+    if (Math.abs(diff) > 20) { if (diff < 0) moveUp(); else moveDown(); }
+    touchStart.current = null;
+  };
+
+  // ==========================================
+  // HIGH SCORE CHECK
+  // ==========================================
+
+  const checkHighScore = () => {
+    const _b = loadLeaderboard(); setLeaderboard(_b); setNewHighScore(isHighScore(_b, G.score));
+  };
+
+  // ==========================================
+  // QUIZ LOGIC
+  // ==========================================
+
+  const pickQuiz = () => {
+    const available = QUIZ_QUESTIONS.filter((_, i) => usedQRef.current.indexOf(i) === -1);
+    const pool = available.length > 0 ? available : QUIZ_QUESTIONS;
+    const idx = Math.floor(Math.random() * pool.length);
+    const realIdx = QUIZ_QUESTIONS.indexOf(pool[idx]);
+    usedQRef.current = [...usedQRef.current, realIdx];
+
+    // Shuffle answer order so correct answer isn't always in the same spot
+    const q = pool[idx];
+    const indices = [0, 1, 2];
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    const shuffled = {
+      question: q.question,
+      answers: indices.map(i => q.answers[i]),
+      correct: indices.indexOf(q.correct),
+      explanation: q.explanation,
+    };
+
+    setCurrentQuiz(shuffled);
+    setUsedQuestions(usedQRef.current);
+    setQuizAnswer(null);
+  };
+
+  const answerQuiz = (ansIdx) => {
+    setQuizAnswer(ansIdx);
+    G.quizTotal++;
+    if (ansIdx === currentQuiz.correct) { G.quizScore++; G.score += 50; soundEngine.play("quizCorrect"); }
+    else soundEngine.play("quizWrong");
+    forceRender();
+  };
+
+  const nextAfterQuiz = () => {
+    if (G.level >= LEVELS.length - 1) {
+      G.screen = "results"; soundEngine.play("gameOver"); soundEngine.stopPowerMusic(); checkHighScore(); forceRender();
+    } else {
+      G.level++; G.entities = []; G.activePower = null;
+      G.screen = "levelIntro"; forceRender();
+    }
+  };
+
+  // ==========================================
+  // GAME STATE MANAGEMENT
+  // ==========================================
+
+  const startGame = async () => {
+    await initAudio();
+    soundEngine.play("start");
+    soundEngine.stopPowerMusic();
+    Object.assign(G, {
+      score: 0, lives: 3, level: 0, lane: 1,
+      entities: [], particles: [],
+      activePower: null, powerTimer: 0,
+      combo: 0, maxCombo: 0,
+      goodCaught: 0, badDodged: 0, badCaught: 0,
+      quizScore: 0, quizTotal: 0,
+      gameTime: 0, scrollX: 0, spawnTimer: 0, entityId: 0,
+      flashColor: null, shakeScreen: false, showPowerTooltip: null,
+      screen: "levelIntro",
+    });
+    usedQRef.current = [];
+    setUsedQuestions([]); setNewHighScore(false); setLbSaved(false); setLbName("");
+    forceRender();
+  };
+
+  const startLevel = () => {
+    G.entities = []; G.gameTime = 0; G.spawnTimer = 0;
+    soundEngine.play("start");
+    G.screen = "game";
+    lastTime.current = 0;
+    animRef.current = requestAnimationFrame(gameLoop);
+  };
+
+  // Leaderboard save
+  const saveScore = () => {
+    if (!lbName.trim()) return;
+    setLbLoading(true);
+    const diq = getDataIQ();
+    const board = saveToLeaderboard({ name: lbName.trim().toUpperCase(), score: G.score, rating: diq.rating });
+    setLeaderboard(board); setLbSaved(true); setLbLoading(false);
+    soundEngine.play("highscore");
+  };
+
+  // ==========================================
+  // DATA IQ RATING
+  // ==========================================
+
+  const getDataIQ = () => {
+    const maxScore = 2000;
+    const pct = Math.min(G.score / maxScore, 1);
+    if (pct > 0.75) return { rating: "DATA GENIUS", emoji: "S", color: COLORS.gold };
+    if (pct > 0.55) return { rating: "DATA PRO", emoji: "A", color: COLORS.brightGreen };
+    if (pct > 0.35) return { rating: "DATA SAVVY", emoji: "B", color: COLORS.teal };
+    if (pct > 0.18) return { rating: "DATA ROOKIE", emoji: "C", color: COLORS.accentBlue };
+    return { rating: "DATA NEWBIE", emoji: "D", color: COLORS.gray };
+  };
+
+  // ==========================================
+  // RETRO EFFECTS
+  // ==========================================
+
+  const Scanlines = () => (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)", zIndex: 100 }} />
+  );
+  const CRTGlow = () => (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", boxShadow: `inset 0 0 60px rgba(0,180,160,0.1), inset 0 0 120px rgba(0,0,0,0.3)`, borderRadius: 8, zIndex: 99 }} />
+  );
+
+  const PixelBackground = () => {
+    const gridSize = 40;
+    const offset = G.scrollX % gridSize;
+    return (
+      <g>
+        <rect x={0} y={0} width={GAME_W} height={GAME_H} fill={COLORS.deepBlue} />
+        {Array.from({ length: Math.ceil(GAME_W / gridSize) + 1 }).map((_, i) => (
+          <line key={`v${i}`} x1={i * gridSize - offset} y1={0} x2={i * gridSize - offset} y2={GAME_H} stroke={COLORS.brandBlue} strokeWidth={1} opacity={0.3} />
+        ))}
+        {Array.from({ length: Math.ceil(GAME_H / gridSize) + 1 }).map((_, i) => (
+          <line key={`h${i}`} x1={0} y1={i * gridSize} x2={GAME_W} y2={i * gridSize} stroke={COLORS.brandBlue} strokeWidth={1} opacity={0.3} />
+        ))}
+        {LANES.map((ly, i) => (
+          <rect key={`lane${i}`} x={0} y={ly - 22} width={GAME_W} height={44} fill={i === G.lane ? COLORS.teal : COLORS.brandBlue} opacity={i === G.lane ? 0.12 : 0.06} />
+        ))}
+        {[0, 1, 2, 3, 4, 5].map((i) => {
+          const bx = ((i * 73 + G.scrollX * 0.3) % (GAME_W + 40)) - 20;
+          const by = 50 + i * 60;
+          return <text key={`bit${i}`} x={bx} y={by} fill={COLORS.brandBlue} opacity={0.2} style={{ ...pixelFont, fontSize: 8 }}>{["01", "10", "11", "00", "01", "10"][i]}</text>;
+        })}
+      </g>
+    );
+  };
+
+  // ==========================================
+  // SHARED WRAPPERS
+  // ==========================================
+
+  const GameContainer = ({ children }) => (
+    <div style={{ width: "100%", maxWidth: 440, margin: "0 auto", ...pixelFont, position: "relative", userSelect: "none", WebkitUserSelect: "none" }}>
+      <FontLoader />
+      {children}
+    </div>
+  );
+
+  const ScreenBox = ({ children }) => (
+    <div style={{ background: COLORS.deepBlue, borderRadius: 8, border: `3px solid ${COLORS.teal}`, overflow: "hidden", position: "relative", boxShadow: `0 0 30px rgba(0,180,160,0.2), 0 4px 20px rgba(0,0,0,0.4)` }}>
+      <Scanlines />
+      <CRTGlow />
+      {children}
+    </div>
+  );
+
+  // Mute button overlay (shown on all screens except title)
+  const MuteButton = () => (
+    <button
+      onClick={toggleMute}
+      style={{
+        position: "absolute", top: 8, right: 8, zIndex: 110,
+        ...pixelFont, fontSize: 10, padding: "4px 6px",
+        background: "transparent", color: muted ? COLORS.red : COLORS.teal,
+        border: `1px solid ${muted ? COLORS.red : COLORS.teal}`,
+        cursor: "pointer", opacity: 0.7, lineHeight: 1,
+      }}
+      title={muted ? "Unmute" : "Mute"}
+    >
+      {muted ? "♪X" : "♪"}
+    </button>
+  );
+
+  // ==========================================
+  // LEADERBOARD COMPONENT
+  // ==========================================
+
+  const LeaderboardPanel = ({ onClose }) => (
+    <div style={{ padding: "24px 16px", textAlign: "center" }}>
+      <div style={{ fontSize: 12, color: COLORS.gold, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <TrophyIcon size={18} /> LEADERBOARD <TrophyIcon size={18} />
+      </div>
+      <div style={{ fontSize: 7, color: COLORS.gray, marginBottom: 16 }}>TOP DATA DASHERS</div>
+
+      {leaderboard.length === 0 ? (
+        <div style={{ fontSize: 8, color: COLORS.gray, padding: "20px 0", fontFamily: "'DM Sans', sans-serif" }}>
+          No scores yet. Be the first!
+        </div>
+      ) : (
+        <div style={{ maxHeight: 300, overflowY: "auto" }}>
+          {leaderboard.map((entry, i) => (
+            <div
+              key={i}
+              style={{
+                display: "grid", gridTemplateColumns: "24px 1fr auto",
+                alignItems: "center", gap: 8,
+                padding: "8px 10px", marginBottom: 4,
+                background: i === 0 ? `${COLORS.gold}15` : i === 1 ? `${COLORS.offWhite}08` : i === 2 ? `${COLORS.orange}10` : "transparent",
+                border: `1px solid ${i < 3 ? COLORS.gold + "40" : COLORS.brandBlue}`,
+                textAlign: "left",
+              }}
+            >
+              <div style={{
+                fontSize: i < 3 ? 10 : 8,
+                color: i === 0 ? COLORS.gold : i === 1 ? COLORS.offWhite : i === 2 ? COLORS.orange : COLORS.gray,
+                textAlign: "center",
+              }}>
+                {i === 0 ? "1st" : i === 1 ? "2nd" : i === 2 ? "3rd" : `${i + 1}`}
+              </div>
+              <div>
+                <div style={{ fontSize: 8, color: COLORS.white, marginBottom: 2 }}>{entry.name}</div>
+                <div style={{ fontSize: 6, color: COLORS.gray }}>{entry.rating} / {entry.date}</div>
+              </div>
+              <div style={{ fontSize: 10, color: i === 0 ? COLORS.gold : COLORS.teal, textAlign: "right" }}>
+                {entry.score.toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={onClose}
+        style={{ ...pixelFont, fontSize: 8, padding: "8px 20px", background: COLORS.brandBlue, color: COLORS.teal, border: `2px solid ${COLORS.teal}`, cursor: "pointer", marginTop: 16 }}
+      >
+        BACK
+      </button>
+    </div>
+  );
+
+  // ==========================================
+  // RENDER SCREENS
+  // ==========================================
+
+  // ---- TITLE SCREEN ----
+  if (G.screen === "title") {
+    if (showLeaderboard) {
+      return (
+        <GameContainer>
+          <ScreenBox>
+            <LeaderboardPanel onClose={() => setShowLeaderboard(false)} />
+          </ScreenBox>
+        </GameContainer>
+      );
+    }
+
+    return (
+      <GameContainer>
+        <ScreenBox>
+          <div style={{ padding: "40px 24px", textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: COLORS.teal, letterSpacing: 4, marginBottom: 8 }}>USADATA PRESENTS</div>
+            <div style={{ fontSize: 28, color: COLORS.white, marginBottom: 4, lineHeight: 1.4, textShadow: `0 0 20px ${COLORS.teal}, 0 2px 0 ${COLORS.brandBlue}` }}>DATA</div>
+            <div style={{ fontSize: 28, color: COLORS.teal, marginBottom: 20, lineHeight: 1, textShadow: `0 0 20px ${COLORS.teal}` }}>DASH</div>
+
+            <svg width={200} height={60} style={{ margin: "0 auto 24px", display: "block" }}>
+              <PixelHero x={20} y={30} powered={false} scale={1.2} />
+              <PixelGoodLead x={80} y={20} enhanced={false} />
+              <PixelBadLead x={120} y={30} type="bad_address" />
+              <PixelPowerUp x={160} y={24} type="teal" />
+            </svg>
+
+            <div style={{ fontSize: 8, color: COLORS.offWhite, marginBottom: 6, lineHeight: 1.8, fontFamily: "'DM Sans', sans-serif" }}>
+              Collect quality leads. Dodge bad data.
+            </div>
+            <div style={{ fontSize: 8, color: COLORS.teal, marginBottom: 30, lineHeight: 1.8, fontFamily: "'DM Sans', sans-serif" }}>
+              Grab power-ups powered by real USADATA products.
+            </div>
+
+            <button
+              onClick={startGame}
+              style={{ ...pixelFont, fontSize: 14, padding: "14px 36px", background: COLORS.teal, color: COLORS.deepBlue, border: "none", borderRadius: 0, cursor: "pointer", boxShadow: `4px 4px 0 ${COLORS.brandBlue}`, transition: "transform 0.1s", display: "block", margin: "0 auto" }}
+              onMouseOver={(e) => e.target.style.transform = "translate(-2px,-2px)"}
+              onMouseOut={(e) => e.target.style.transform = "translate(0,0)"}
+            >
+              START GAME
+            </button>
+
+            <button
+              onClick={async () => { await initAudio(); setLbLoading(true); const b = loadLeaderboard(); setLeaderboard(b); setLbLoading(false); setShowLeaderboard(true); }}
+              style={{ ...pixelFont, fontSize: 8, padding: "10px 20px", background: "transparent", color: COLORS.gold, border: `2px solid ${COLORS.gold}`, cursor: "pointer", marginTop: 12, display: "flex", alignItems: "center", gap: 8, margin: "12px auto 0" }}
+            >
+              <TrophyIcon size={12} /> LEADERBOARD
+            </button>
+
+            <div style={{ fontSize: 7, color: COLORS.gray, marginTop: 20, lineHeight: 1.6 }}>USE ▲▼ BUTTONS, ARROW KEYS, OR SWIPE</div>
+            <div style={{ fontSize: 7, color: COLORS.teal, marginTop: 16, letterSpacing: 2 }}>activate. accelerate. amplify.</div>
+          </div>
+        </ScreenBox>
+      </GameContainer>
+    );
+  }
+
+  // ---- LEVEL INTRO ----
+  if (G.screen === "levelIntro") {
+    const lvl = LEVELS[G.level];
+    return (
+      <GameContainer>
+        <ScreenBox>
+          <MuteButton />
+          <div style={{ padding: "48px 24px", textAlign: "center" }}>
+            <div style={{ fontSize: 9, color: COLORS.gray, marginBottom: 12 }}>LEVEL {G.level + 1} OF {LEVELS.length}</div>
+            <div style={{ fontSize: 18, color: COLORS.gold, marginBottom: 16, textShadow: `0 0 15px ${COLORS.gold}` }}>{lvl.name}</div>
+
+            {lvl.powerUp && (
+              <div style={{ marginBottom: 20 }}>
+                <svg width={60} height={40} style={{ display: "block", margin: "0 auto 8px" }}>
+                  <PixelPowerUp x={15} y={8} type={lvl.powerUp} />
+                </svg>
+                <div style={{ fontSize: 9, color: COLORS.teal, marginBottom: 4 }}>NEW: {POWER_UPS[lvl.powerUp].name}</div>
+                <div style={{ fontSize: 8, color: COLORS.offWhite, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6, maxWidth: 280, margin: "0 auto" }}>
+                  {POWER_UPS[lvl.powerUp].desc}
+                </div>
+              </div>
+            )}
+
+            <div style={{ fontSize: 8, color: COLORS.offWhite, marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>{lvl.desc}</div>
+
+            <button onClick={startLevel} style={{ ...pixelFont, fontSize: 11, padding: "12px 28px", background: COLORS.teal, color: COLORS.deepBlue, border: "none", cursor: "pointer", boxShadow: `4px 4px 0 ${COLORS.brandBlue}` }}>
+              GO!
+            </button>
+          </div>
+        </ScreenBox>
+      </GameContainer>
+    );
+  }
+
+  // ---- GAME SCREEN ----
+  if (G.screen === "game") {
+    const lvl = LEVELS[G.level];
+    const progressPct = Math.min((G.gameTime / LEVEL_DURATION) * 100, 100);
+
+    return (
+      <GameContainer>
+        <ScreenBox>
+          {/* HUD */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: COLORS.brandBlue, borderBottom: `2px solid ${COLORS.teal}`, position: "relative", zIndex: 10 }}>
+            <div style={{ fontSize: 8, color: COLORS.gold }}>{G.score.toString().padStart(5, "0")}</div>
+            <div style={{ fontSize: 7, color: COLORS.teal }}>LV{G.level + 1} {lvl.name}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 8, color: COLORS.red }}>{"♥".repeat(G.lives)}{"♡".repeat(3 - G.lives)}</span>
+              <button onClick={toggleMute} style={{ ...pixelFont, fontSize: 8, padding: "2px 4px", background: "transparent", color: muted ? COLORS.red : COLORS.teal, border: "none", cursor: "pointer", lineHeight: 1 }}>
+                {muted ? "♪X" : "♪"}
+              </button>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div style={{ height: 3, background: COLORS.darkGray, position: "relative", zIndex: 10 }}>
+            <div style={{ height: "100%", width: `${progressPct}%`, background: `linear-gradient(90deg, ${COLORS.teal}, ${COLORS.brightGreen})`, transition: "width 0.3s" }} />
+          </div>
+
+          {G.combo > 2 && (
+            <div style={{ position: "absolute", top: 48, right: 12, fontSize: 10, color: COLORS.gold, textShadow: `0 0 8px ${COLORS.gold}`, zIndex: 20 }}>
+              x{G.combo} COMBO!
+            </div>
+          )}
+
+          {G.showPowerTooltip && (
+            <div style={{ position: "absolute", top: 50, left: "50%", transform: "translateX(-50%)", background: COLORS.gold, color: COLORS.deepBlue, padding: "6px 14px", fontSize: 7, zIndex: 30, textAlign: "center", boxShadow: `0 0 15px ${COLORS.gold}`, maxWidth: 250 }}>
+              <div style={{ fontSize: 9, marginBottom: 2 }}>{POWER_UPS[G.showPowerTooltip].name}</div>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9 }}>{POWER_UPS[G.showPowerTooltip].short}</div>
+            </div>
+          )}
+
+          {G.activePower && (
+            <div style={{ position: "absolute", top: 48, left: 12, fontSize: 7, color: COLORS.gold, zIndex: 20 }}>
+              ◆ {POWER_UPS[G.activePower].name}
+            </div>
+          )}
+
+          {/* Game Canvas */}
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            style={{ position: "relative", width: "100%", aspectRatio: "1", overflow: "hidden", cursor: "pointer", transform: G.shakeScreen ? "translateX(3px)" : "none", transition: "transform 0.05s" }}
+          >
+            {G.flashColor && (
+              <div style={{ position: "absolute", inset: 0, background: G.flashColor, opacity: 0.15, zIndex: 50, pointerEvents: "none" }} />
+            )}
+
+            {LANES.map((ly, i) => (
+              <div key={`tap${i}`} onClick={() => handleLaneTap(i)} style={{ position: "absolute", left: 0, top: `${((ly - 50) / GAME_H) * 100}%`, width: "100%", height: `${(100 / GAME_H) * 100}%`, zIndex: 40 }} />
+            ))}
+
+            <svg viewBox={`0 0 ${GAME_W} ${GAME_H}`} width="100%" height="100%" style={{ display: "block" }}>
+              <PixelBackground />
+              <PixelHero x={HERO_X} y={LANES[G.lane] - 15} powered={!!G.activePower} scale={1} />
+              {G.entities.map((e) => {
+                if (e.type === "good") return <PixelGoodLead key={e.id} x={e.x} y={e.y - 15} enhanced={e.enhanced || G.activePower === "enhance"} />;
+                if (e.type === "bad") {
+                  if (G.activePower === "hygiene") return <g key={e.id} opacity={0.3}><PixelBadLead x={e.x} y={e.y - 15} type={e.badType} /></g>;
+                  return <PixelBadLead key={e.id} x={e.x} y={e.y - 15} type={e.badType} />;
+                }
+                if (e.type === "powerup") return <PixelPowerUp key={e.id} x={e.x} y={e.y - 12} type={e.powerType} />;
+                return null;
+              })}
+              {G.particles.map((p) => <rect key={p.id} x={p.x} y={p.y} width={4} height={4} fill={p.color} opacity={p.life / 600} />)}
+              {LANES.map((ly, i) => <text key={`ll${i}`} x={GAME_W - 8} y={ly + 4} fill={COLORS.teal} opacity={0.3} textAnchor="end" style={{ ...pixelFont, fontSize: 7 }}>{["TOP", "MID", "LOW"][i]}</text>)}
+            </svg>
+          </div>
+
+          {/* Controls + Legend */}
+          <div style={{ display: "flex", alignItems: "stretch", background: COLORS.brandBlue, borderTop: `2px solid ${COLORS.teal}`, position: "relative", zIndex: 10 }}>
+            {/* Lane buttons */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 0, flex: "0 0 auto" }}>
+              <button
+                onClick={moveUp}
+                style={{ ...pixelFont, fontSize: 14, padding: "10px 18px", background: G.lane > 0 ? COLORS.teal : COLORS.darkGray, color: G.lane > 0 ? COLORS.deepBlue : COLORS.gray, border: "none", borderRight: `2px solid ${COLORS.teal}`, borderBottom: `1px solid ${COLORS.deepBlue}`, cursor: "pointer", lineHeight: 1 }}
+              >
+                ▲
+              </button>
+              <button
+                onClick={moveDown}
+                style={{ ...pixelFont, fontSize: 14, padding: "10px 18px", background: G.lane < 2 ? COLORS.teal : COLORS.darkGray, color: G.lane < 2 ? COLORS.deepBlue : COLORS.gray, border: "none", borderRight: `2px solid ${COLORS.teal}`, cursor: "pointer", lineHeight: 1 }}
+              >
+                ▼
+              </button>
+            </div>
+            {/* Legend */}
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, flex: 1, padding: "6px 8px" }}>
+              {[
+                { color: COLORS.green, label: "GOOD" },
+                { color: COLORS.red, label: "BAD" },
+                { color: COLORS.gold, label: "POWER-UP", rotate: true },
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{ width: 8, height: 8, background: item.color, transform: item.rotate ? "rotate(45deg)" : "none" }} />
+                  <span style={{ fontSize: 6, color: COLORS.offWhite }}>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </ScreenBox>
+      </GameContainer>
+    );
+  }
+
+  // ---- QUIZ SCREEN ----
+  if (G.screen === "quiz" && currentQuiz) {
+    return (
+      <GameContainer>
+        <ScreenBox>
+          <MuteButton />
+          <div style={{ padding: "32px 20px", textAlign: "center" }}>
+            <div style={{ fontSize: 9, color: COLORS.gold, marginBottom: 4 }}>DATA CHECK</div>
+            <div style={{ fontSize: 7, color: COLORS.gray, marginBottom: 20 }}>AFTER LEVEL {G.level + 1}</div>
+
+            <div style={{ fontSize: 9, color: COLORS.offWhite, marginBottom: 24, lineHeight: 1.8, fontFamily: "'DM Sans', sans-serif" }}>
+              {currentQuiz.question}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+              {currentQuiz.answers.map((ans, i) => {
+                let bg = COLORS.brandBlue;
+                let border = COLORS.accentBlue;
+                if (quizAnswer !== null) {
+                  if (i === currentQuiz.correct) { bg = COLORS.green; border = COLORS.brightGreen; }
+                  else if (i === quizAnswer && i !== currentQuiz.correct) { bg = COLORS.red; border = COLORS.darkRed; }
+                }
+                return (
+                  <button
+                    key={i}
+                    onClick={() => quizAnswer === null && answerQuiz(i)}
+                    style={{ ...pixelFont, fontSize: 8, padding: "10px 16px", background: bg, color: COLORS.white, border: `2px solid ${border}`, cursor: quizAnswer === null ? "pointer" : "default", textAlign: "left", lineHeight: 1.6, opacity: quizAnswer !== null && i !== currentQuiz.correct && i !== quizAnswer ? 0.4 : 1 }}
+                  >
+                    {String.fromCharCode(65 + i)}. {ans}
+                  </button>
+                );
+              })}
+            </div>
+
+            {quizAnswer !== null && (
+              <>
+                <div style={{ fontSize: 8, color: quizAnswer === currentQuiz.correct ? COLORS.brightGreen : COLORS.orange, marginBottom: 8 }}>
+                  {quizAnswer === currentQuiz.correct ? "CORRECT! +50 PTS" : "NOT QUITE!"}
+                </div>
+                <div style={{ fontSize: 8, color: COLORS.offWhite, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6, marginBottom: 20, maxWidth: 300, margin: "0 auto 20px" }}>
+                  {currentQuiz.explanation}
+                </div>
+                <button onClick={nextAfterQuiz} style={{ ...pixelFont, fontSize: 10, padding: "10px 24px", background: COLORS.teal, color: COLORS.deepBlue, border: "none", cursor: "pointer", boxShadow: `4px 4px 0 ${COLORS.brandBlue}` }}>
+                  {G.level >= LEVELS.length - 1 ? "SEE RESULTS" : "NEXT LEVEL"}
+                </button>
+              </>
+            )}
+          </div>
+        </ScreenBox>
+      </GameContainer>
+    );
+  }
+
+  // ---- RESULTS SCREEN ----
+  if (G.screen === "results") {
+    if (showLeaderboard) {
+      return (
+        <GameContainer>
+          <ScreenBox>
+            <LeaderboardPanel onClose={() => setShowLeaderboard(false)} />
+          </ScreenBox>
+        </GameContainer>
+      );
+    }
+
+    const diq = getDataIQ();
+    return (
+      <GameContainer>
+        <ScreenBox>
+          <MuteButton />
+          <div style={{ padding: "28px 20px", textAlign: "center" }}>
+            <div style={{ fontSize: 9, color: COLORS.gray, marginBottom: 8 }}>GAME OVER</div>
+            <div style={{ fontSize: 20, color: COLORS.gold, marginBottom: 4, textShadow: `0 0 15px ${COLORS.gold}` }}>{diq.rating}</div>
+            <div style={{ width: 44, height: 44, margin: "6px auto 12px", background: diq.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: COLORS.deepBlue, boxShadow: `0 0 20px ${diq.color}` }}>
+              {diq.emoji}
+            </div>
+
+            {/* Stats grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
+              {[
+                { label: "SCORE", value: G.score, color: COLORS.gold },
+                { label: "QUIZ", value: `${G.quizScore}/${G.quizTotal}`, color: COLORS.teal },
+                { label: "LEADS", value: G.goodCaught, color: COLORS.green },
+                { label: "MAX COMBO", value: `x${G.maxCombo}`, color: COLORS.orange },
+                { label: "BAD DODGED", value: G.badDodged, color: COLORS.brightGreen },
+                { label: "BAD CAUGHT", value: G.badCaught, color: COLORS.red },
+              ].map((stat, i) => (
+                <div key={i} style={{ background: COLORS.brandBlue, padding: "6px 4px", border: `1px solid ${COLORS.accentBlue}` }}>
+                  <div style={{ fontSize: 6, color: COLORS.gray, marginBottom: 3 }}>{stat.label}</div>
+                  <div style={{ fontSize: 11, color: stat.color }}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* HIGH SCORE ENTRY */}
+            {newHighScore && !lbSaved && (
+              <div style={{ background: `${COLORS.gold}15`, border: `2px solid ${COLORS.gold}`, padding: "12px", marginBottom: 14 }}>
+                <div style={{ fontSize: 9, color: COLORS.gold, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <TrophyIcon size={14} /> NEW HIGH SCORE! <TrophyIcon size={14} />
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    type="text"
+                    placeholder="YOUR NAME"
+                    maxLength={12}
+                    value={lbName}
+                    onChange={(e) => setLbName(e.target.value.toUpperCase())}
+                    style={{ ...pixelFont, fontSize: 8, flex: 1, padding: "8px", background: COLORS.brandBlue, color: COLORS.white, border: `2px solid ${COLORS.accentBlue}`, outline: "none", textTransform: "uppercase" }}
+                    onKeyDown={(e) => e.key === "Enter" && saveScore()}
+                  />
+                  <button
+                    onClick={saveScore}
+                    disabled={!lbName.trim() || lbLoading}
+                    style={{ ...pixelFont, fontSize: 8, padding: "8px 12px", background: lbName.trim() ? COLORS.gold : COLORS.gray, color: COLORS.deepBlue, border: "none", cursor: lbName.trim() ? "pointer" : "not-allowed" }}
+                  >
+                    {lbLoading ? "..." : "SAVE"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {lbSaved && (
+              <div style={{ fontSize: 8, color: COLORS.brightGreen, marginBottom: 12 }}>
+                SCORE SAVED TO LEADERBOARD!
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
+              <button onClick={startGame} style={{ ...pixelFont, fontSize: 10, padding: "10px 24px", background: COLORS.teal, color: COLORS.deepBlue, border: "none", cursor: "pointer", boxShadow: `4px 4px 0 ${COLORS.brandBlue}`, width: 220 }}>
+                PLAY AGAIN
+              </button>
+              <button
+                onClick={() => { const b = loadLeaderboard(); setLeaderboard(b); setShowLeaderboard(true); }}
+                style={{ ...pixelFont, fontSize: 8, padding: "8px 20px", background: "transparent", color: COLORS.gold, border: `2px solid ${COLORS.gold}`, cursor: "pointer", width: 220, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                <TrophyIcon size={12} /> LEADERBOARD
+              </button>
+              <button onClick={() => { G.screen = "leadForm"; forceRender(); }} style={{ ...pixelFont, fontSize: 8, padding: "8px 20px", background: "transparent", color: COLORS.teal, border: `2px solid ${COLORS.teal}`, cursor: "pointer", width: 220 }}>
+                LEVEL UP YOUR DATA
+              </button>
+            </div>
+
+            <div style={{ fontSize: 7, color: COLORS.teal, marginTop: 16, letterSpacing: 2 }}>activate. accelerate. amplify.</div>
+          </div>
+        </ScreenBox>
+      </GameContainer>
+    );
+  }
+
+  // ---- LEAD FORM SCREEN ----
+  if (G.screen === "leadForm") {
+    return (
+      <GameContainer>
+        <ScreenBox>
+          <MuteButton />
+          <div style={{ padding: "32px 24px", textAlign: "center" }}>
+            {!formSubmitted ? (
+              <>
+                <div style={{ fontSize: 14, color: COLORS.teal, marginBottom: 8, textShadow: `0 0 10px ${COLORS.teal}` }}>POWER UP</div>
+                <div style={{ fontSize: 8, color: COLORS.offWhite, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6, marginBottom: 24 }}>
+                  Ready to see what clean, enriched data can do for your business? Connect with a USADATA Data Specialist.
+                </div>
+
+                {[
+                  { key: "name", placeholder: "YOUR NAME", type: "text" },
+                  { key: "email", placeholder: "EMAIL", type: "email" },
+                  { key: "company", placeholder: "COMPANY", type: "text" },
+                ].map((field) => (
+                  <input
+                    key={field.key}
+                    type={field.type}
+                    placeholder={field.placeholder}
+                    value={leadFormData[field.key]}
+                    onChange={(e) => setLeadFormData((d) => ({ ...d, [field.key]: e.target.value }))}
+                    style={{ ...pixelFont, fontSize: 8, width: "100%", padding: "10px 12px", marginBottom: 10, background: COLORS.brandBlue, color: COLORS.white, border: `2px solid ${COLORS.accentBlue}`, outline: "none", boxSizing: "border-box" }}
+                  />
+                ))}
+
+                <button
+                  onClick={() => { setFormSubmitted(true); soundEngine.play("powerup"); }}
+                  disabled={!leadFormData.email}
+                  style={{ ...pixelFont, fontSize: 10, padding: "12px 28px", background: leadFormData.email ? COLORS.teal : COLORS.gray, color: COLORS.deepBlue, border: "none", cursor: leadFormData.email ? "pointer" : "not-allowed", boxShadow: `4px 4px 0 ${COLORS.brandBlue}`, marginTop: 8, width: "100%" }}
+                >
+                  SEND IT
+                </button>
+
+                <button onClick={() => { G.screen = "results"; forceRender(); }} style={{ ...pixelFont, fontSize: 7, padding: "8px", background: "transparent", color: COLORS.gray, border: "none", cursor: "pointer", marginTop: 12 }}>
+                  BACK TO RESULTS
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 16, color: COLORS.gold, marginBottom: 12, textShadow: `0 0 15px ${COLORS.gold}` }}>QUEST ACCEPTED!</div>
+                <div style={{ fontSize: 9, color: COLORS.offWhite, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.8, marginBottom: 24 }}>
+                  A USADATA Data Specialist will reach out soon. In the meantime, explore what 260+ million records and 25+ years of expertise can do for your marketing.
+                </div>
+
+                <a href="https://www.usadata.com/contact-us-home" target="_blank" rel="noopener noreferrer" style={{ ...pixelFont, fontSize: 9, display: "inline-block", padding: "12px 24px", background: COLORS.teal, color: COLORS.deepBlue, textDecoration: "none", boxShadow: `4px 4px 0 ${COLORS.brandBlue}`, marginBottom: 12 }}>
+                  VISIT USADATA.COM
+                </a>
+
+                <br />
+                <button
+                  onClick={() => { setFormSubmitted(false); setLeadFormData({ name: "", email: "", company: "" }); startGame(); }}
+                  style={{ ...pixelFont, fontSize: 8, padding: "8px 16px", background: "transparent", color: COLORS.teal, border: `2px solid ${COLORS.teal}`, cursor: "pointer", marginTop: 8 }}
+                >
+                  PLAY AGAIN
+                </button>
+
+                <div style={{ fontSize: 7, color: COLORS.teal, marginTop: 24, letterSpacing: 2 }}>activate. accelerate. amplify.</div>
+              </>
+            )}
+          </div>
+        </ScreenBox>
+      </GameContainer>
+    );
+  }
+
+  return null;
+}
+
+
+// Mount the app
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<DataDash />);
+</script>
+</body>
+</html>
